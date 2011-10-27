@@ -1,0 +1,80 @@
+Differences between Nu data model and VGA Planets
+==================================================
+
+  (This deals with the 'rst' object only)
+
+
+  beamspec.dat ("beams"), torpspec.dat ("torpedoes"), and engspec.dat
+  ("engines") are pretty standard.
+
+  hullspec.dat ("hulls") does not contain a picture Id, instead, the
+  client synthesizes a picture name using the hull Id.
+
+  "hulls" also contains a "cancloak" field. The other hull functions
+  are hard-coded.
+
+  truehull.dat is not transmitted; instead, "racehulls" contains only
+  this player's hulls.
+
+  Players are numbered from 1, and owners are given as player Ids. 
+  Each player maps to a race. It is unclear how an "all-Feds" game
+  would work as they would all map to the same race and thus the same
+  name.
+
+  The "ships" section is used for both "ship.dat" and "target.dat".
+  It has the following differences:
+  - waypoints are stored in absolute form (targetx, targety), not dx/dy.
+  - missions are 0-based (0=explore, 1=mine sweep, 2=lay mines, ...),
+    not 1-based.
+  - the Tow mission stores its parameter in the same slot as the
+    Intercept mission (mission1target).
+  - there can be only a ship/ship or ship/planet transfer at a time,
+    not both. This matches the planets.exe GUI restriction, but not
+    the file format as implemented by 3rd party. The type is
+    identified by the transfertargettype field (1=planet, 2=ship).
+
+  The "planets" section is used for "pdata.dat", "xyplan.dat", and
+  "planet.nm". It has the following differences:
+  - invisible planets are not transmitted (i.e. their names are not
+    known)
+  - the temperature is stored as-is, not 100-x.
+
+  The "starbases" section is used for "bdata.dat".
+  - Bases are addressed by a base Id, which has no relation to a
+    planet Id; the planet Id is an attribute of the base.
+  - The ship to build is identified by a hull number, not a truehull
+    slot.
+  - Base storage is organized as "stock" (another top-level object).
+    Each stock is a tuple of (starbaseid, stocktype, stockid, amount,
+    builtamount, id), with
+    . starbaesid being the base (not planet!) Id
+    . stocktype is 1 for hulls, 2 for engines, 3 for beams, 4 for
+      launchers, and 5 for torpedoes
+    . stockid is the item Id (hullspec/engspec/beamspec/torpspec
+      index)
+    This means, a base can theoretically store and build ships not
+    in truehull.
+
+  The "gen.dat" file can be assembled from various pieces. A
+  timestamp can be obtained by reformatting the settings.hoststart
+  value normally in format "8/12/2011 9:00:13 PM".
+
+  Messages have a messagetype, a headline and a body. The messagetype
+  can produce a "(-xNNNN)<<< foo >>>" line together with the target
+  field, the headline is used as "From: ...", and the body contains
+  the actual text, with embedded HTML. In addition, messages contain
+  x,y, which can be used to produce explosion markers (messagetype 10).
+  Like HOST, Nu is not consistent in marking messages; messagetype 8
+  is used for exploration ("There are no enemy colonists....") with
+  target being a planet Id, and for gather missions, with target being
+  a ship Id.
+
+  All friendly codes are lower-case.
+
+  Nu tracks undoable actions by counting supplies sold, torpedoes
+  built, etc. However, there is no ability to find out the real
+  "beginning of turn" value of most properties.
+
+  The VCR is almost compatible to Tim-VCR, it uses arithmetic rounding
+  ("0.5 rounds up") instead of banker's rounding ("0.5 rounds towards
+  nearest even").
