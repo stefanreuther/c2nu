@@ -27,10 +27,15 @@
 #    status         Show state file content (no network access)
 #    login U PW     Log in with user Id and password
 #    list           List games (must be logged in)
-#    rst1 [GAME]    Download Nu RST (must be logged in). GAME is the game
+#    rst [GAME]     Download Nu RST (must be logged in). GAME is the game
 #                   number and can be omitted on second and later uses.
-#    rst2           Convert Nu RST to VGAP RST (no network access)
-#    rst [GAME]     Same as rst1 + rst2.
+#                   Convert the Nu RST file to VGAP RST.
+#    dump [GAME]    Download Nu RST and dump beautified JSON.
+#    vcr [GAME]     Download Nu RST and create VGAP VCRx.DAT for PlayVCR.
+#
+#  All download commands can be split in two halves, i.e. "vcr1 [GAME]"
+#  to perform the download, and "vcr2" to convert the download without
+#  accessing the network.
 #
 #  Instructions:
 #  - make a directory and go there using the command prompt
@@ -102,6 +107,13 @@ if ($cmd eq 'help') {
 } elsif ($cmd eq 'dump') {
     doResult1();
     doDump2();
+} elsif ($cmd eq 'vcr1') {
+    doResult1();
+} elsif ($cmd eq 'vcr2') {
+    doVcr2();
+} elsif ($cmd eq 'vcr') {
+    doResult1();
+    doVcr2();
 } else {
     die "Invalid command '$cmd'\n";
 }
@@ -129,12 +141,12 @@ Commands:
   status            show status
   login USER PASS   log in
   list              list games
-  rst1 [GAME]       download Nu RST
-  rst2              convert Nu RST to VGAP RST
-  rst [GAME]        rst1 + rst2
-  dump1 [GAME]      download Nu RST
-  dump2             dump Nu RST to stdout
-  dump [GAME]       dump1 + dump2
+  rst [GAME]        download Nu RST and convert to VGAP RST
+  dump [GAME]       download Nu RST and dump JSON
+  vcr [GAME]        download Nu RST and create VGAP VCRx.DAT
+
+Download commands can be split into the download part ('vcr1') and the
+convert part ('vcr2').
 EOF
 }
 
@@ -243,6 +255,73 @@ sub doList {
     } else {
         print "++ Unable to obtain game list ++\n";
     }
+}
+
+
+######################################################################
+#
+#  VCR file
+#
+######################################################################
+
+sub doVcr2 {
+    # Read state
+    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
+    my $body;
+    while (1) {
+        my $tmp;
+        if (!read(IN, $tmp, 4096)) { last }
+        $body .= $tmp;
+    }
+    close IN;
+
+    print "Parsing result...\n";
+    doVcr(jsonParse($body));
+}
+
+sub doVcr {
+    # Fetch parameter
+    my $parsedReply = shift;
+    if (!exists $parsedReply->{rst}) {
+        die "ERROR: no result file received\n";
+    }
+    if (!$parsedReply->{rst}{player}{raceid}) {
+        die "ERROR: result does not contain player name\n";
+    }
+    if ($parsedReply->{rst}{player}{savekey} ne $parsedReply->{savekey}) {
+        die "ERROR: received two different savekeys\n"
+    }
+    stateSet('savekey', $parsedReply->{savekey});
+    stateSet('player', $parsedReply->{rst}{player}{raceid});
+
+    # Make spec files
+    makeSpecFile($parsedReply->{rst}{beams}, "beamspec.dat", 10, "A20v8", 36,
+                 qw(name cost tritanium duranium molybdenum mass techlevel crewkill damage));
+    makeSpecFile($parsedReply->{rst}{torpedos}, "torpspec.dat", 10, "A20v9", 38,
+                 qw(name torpedocost launchercost tritanium duranium molybdenum mass techlevel crewkill damage));
+    makeSpecFile($parsedReply->{rst}{engines}, "engspec.dat", 9, "A20v5V9", 66,
+                 qw(name cost tritanium duranium molybdenum techlevel warp1 warp2 warp3 warp4 warp5 warp6 warp7 warp8 warp9));
+    makeSpecFile($parsedReply->{rst}{hulls}, "hullspec.dat", 105, "A30v15", 60,
+                 qw(name zzimage zzunused tritanium duranium molybdenum fueltank
+                    crew engines mass techlevel cargo fighterbays launchers beams cost));
+    makeSpecFile($parsedReply->{rst}{planets}, "xyplan.dat", 500, "v3", 6,
+                 qw(x y ownerid));
+    makeSpecFile($parsedReply->{rst}{planets}, "planet.nm", 500, "A20", 20,
+                 qw(name));
+
+    # Make more spec files
+    makeHullfuncFile($parsedReply->{rst}{hulls});
+    makeTruehullFile($parsedReply->{rst}{racehulls}, $parsedReply->{rst}{player}{raceid});
+
+    # Make result
+    my $player = $parsedReply->{rst}{player}{id};
+    my $vcrs = rstPackVcrs($parsedReply, $player);
+    my $fn = "vcr$player.dat";
+    open VCR, "> $fn" or die "$fn: $!\n";
+    print "Making $fn...\n";
+    binmode VCR;
+    print VCR $vcrs;
+    close VCR;
 }
 
 
