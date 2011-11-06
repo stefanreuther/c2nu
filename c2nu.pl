@@ -49,7 +49,7 @@
 use strict;
 use Socket;
 use IO::Handle;
-use bytes;              # without this, perl 5.6.1 
+use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
 #my $opt_jsonDebug = 1;
 my $opt_rootDir = "/usr/share/planets";
@@ -95,6 +95,13 @@ if ($cmd eq 'help') {
 } elsif ($cmd eq 'rst') {
     doResult1();
     doResult2();
+} elsif ($cmd eq 'dump1') {
+    doResult1();
+} elsif ($cmd eq 'dump2') {
+    doDump2();
+} elsif ($cmd eq 'dump') {
+    doResult1();
+    doDump2();
 } else {
     die "Invalid command '$cmd'\n";
 }
@@ -125,6 +132,9 @@ Commands:
   rst1 [GAME]       download Nu RST
   rst2              convert Nu RST to VGAP RST
   rst [GAME]        rst1 + rst2
+  dump1 [GAME]      download Nu RST
+  dump2             dump Nu RST to stdout
+  dump [GAME]       dump1 + dump2
 EOF
 }
 
@@ -585,12 +595,40 @@ sub makeUtilData {
         }
     }
 
-    # TODO: explosions
+    # Allied bases
+    foreach my $base (@{$parsedReply->{rst}{starbases}}) {
+        # Since we're getting allied bases as well, we must filter here
+        my $baseOwner = rstGetBaseOwner($base, $parsedReply);
+        if ($baseOwner != 0 && $baseOwner != $player) {
+            utilWrite(11, pack("vv", $base->{planetid}, rstMapOwnerToRace($parsedReply, $baseOwner)));
+        }
+    }
+
+    # TODO: explosions. Problem is that PCC2 cannot yet display those.
     # TODO: enemy planet scans
 
     close UTIL;
 }
 
+
+######################################################################
+#
+#  Dumping
+#
+######################################################################
+
+sub doDump2 {
+    # Read state
+    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
+    my $body;
+    while (1) {
+        my $tmp;
+        if (!read(IN, $tmp, 4096)) { last }
+        $body .= $tmp;
+    }
+    close IN;
+    jsonDump(jsonParse($body), "");
+}
 
 ######################################################################
 #
@@ -755,6 +793,9 @@ sub rstPackBases {
     my @myHulls = @{$parsedReply->{rst}{racehulls}};
     while (@myHulls < 20) { push @myHulls, 0 }
     foreach my $base (@{$parsedReply->{rst}{starbases}}) {
+        # Since we're getting allied bases as well, we must filter here
+        next if rstGetBaseOwner($base, $parsedReply) != $player;
+
         my $b = pack("v2", $base->{planetid}, rstMapOwnerToRace($parsedReply, $player));
         $b .= rstPackFields($base,
                             "v6",
@@ -799,7 +840,7 @@ sub rstPackMessages {
     my @templates = (
                      "(-r0000)<<< Outbound >>>",            # xx 0 'Outbound', should not appear in inbox
                      "(-h0000)<<< System >>>",              # 1 'System',
-                     "(-t%04d)<<< Terraforming >>>",        # xx 2 'Terraforming',
+                     "(-s%04d)<<< Terraforming >>>",        # 2 'Terraforming',
                      "(-l%04d)<<< Minefield Laid >>>",      # 3 'Minelaying',
                      "(-m%04d)<<< Mine Sweep >>>",          # 4 'Minesweeping',
                      "(-p%04d)<<< Planetside Message >>>",  # 5 'Colony',
@@ -807,7 +848,7 @@ sub rstPackMessages {
                      "(-f%04d)<<< Fleet Message >>>",       # xx 7 'Fleet',
                      "(-s%04d)<<< Ship Message >>>",        # 8 'Ship',
                      "(-n%04d)<<< Intercepted Message >>>", # xx 9 'Enemy Distress Call',
-                     "(-x0000)<<< Explosion >>>",           # xx 10 'Explosion',
+                     "(-x0000)<<< Explosion >>>",           # 10 'Explosion',
                      "(-d%04d)<<< Space Dock Message >>>",  # 11 'Starbase',
                      "(-w%04d)<<< Web Mines >>>",           # 12 'Web Mines',
                      "(-y%04d)<<< Meteor >>>",              # xx 13 'Meteors',
@@ -1017,6 +1058,17 @@ sub rstChecksum {
     $sum;
 }
 
+sub rstGetBaseOwner {
+    my $base = shift;
+    my $parsedReply = shift;
+    foreach my $planet (@{$parsedReply->{rst}{planets}}) {
+        if ($planet->{id} == $base->{planetid}) {
+            return $planet->{ownerid};
+        }
+    }
+    return 0;
+}
+
 sub rstMapOwnerToRace {
     my $parsedReply = shift;
     my $ownerId = shift;
@@ -1127,6 +1179,9 @@ sub stateQuote {
     $x =~ s/\n/\\n/g;
     $x =~ s/\r/\\r/g;
     $x =~ s/\t/\\t/g;
+    $x =~ s/\t/\\t/g;
+    $x =~ s/"/\\"/g;
+    $x =~ s/'/\\'/g;
     $x;
 }
 
@@ -1338,6 +1393,66 @@ sub jsonParse1 {
         $result;
     } else {
         die "JSON syntax error: expecting element, got '" . substr($$pstr, pos($$pstr), 20) . "'.\n";
+    }
+}
+
+sub jsonDump {
+    my $tree = shift;
+    my $prefix = shift;
+    my $indent = "$prefix    ";
+    if (ref($tree) eq 'ARRAY') {
+        # Array.
+        if (@$tree == 0) {
+            # Empty
+            print "[]";
+        } elsif (grep {ref or /\D/} @$tree) {
+            # Full form
+            print "[\n$indent";
+            my $i = 0;
+            foreach (@$tree) {
+                print ",\n$indent" if $i;
+                $i = 1;
+                jsonDump($_, $indent);
+            }
+            print "\n$prefix]";
+        } else {
+            # Short form
+            print "[";
+            my $i = 0;
+            foreach (@$tree) {
+                if ($i > 20) {
+                    print ",\n$indent";
+                    $i = 0;
+                } else {
+                    print "," if $i;
+                    ++$i;
+                }
+                jsonDump($_, $indent);
+            }
+            print "]";
+        }
+    } elsif (ref($tree) eq 'HASH') {
+        # Hash
+        print "{";
+        my $i = 0;
+        foreach (sort keys %$tree) {
+            print "," if $i;
+            $i = 1;
+            print "\n$indent\"", stateQuote($_), "\": ";
+            jsonDump($tree->{$_}, $indent);
+        }
+        print "\n$prefix" if $i;
+        print "}";
+    } else {
+        # scalar
+        if (!defined($tree)) {
+            print "null";
+        } elsif ($tree =~ /^-?\d+$/) {
+            print $tree;
+        } else {
+            $tree =~ s/([\\"])/\\$1/g;
+            print '"', stateQuote($tree), '"';
+        }
     }
 }
 
