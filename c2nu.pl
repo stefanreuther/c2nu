@@ -517,7 +517,8 @@ sub makeResult {
     $offsets[3] = tell(RST)+1;
     print RST $bases;
 
-    my @msgs = rstPackMessages($parsedReply, $player);
+    my @msgs = (rstPackMessages($parsedReply, $player),
+                rstSynthesizeMessages($parsedReply, $player));
     $offsets[4] = tell(RST)+1;
     rstWriteMessages(@msgs);
 
@@ -881,6 +882,90 @@ sub rstPackMessages {
     }
 
     @result;
+}
+
+sub rstSynthesizeMessages {
+    my $parsedReply = shift;
+    my $player = shift;
+    my @result;
+
+    # Settings I (from 'game')
+    my $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
+                                    $parsedReply->{rst}{game},
+                                    [name=>"Game Name: %s"], [description=>"Description: %s"], "\n", [hostdays=>"Host Days: %s"],
+                                    [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"]);
+    push @result, rstEncryptMessage($text) if defined($text);
+
+    # Settings II (from 'settings')
+    $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (2) >>>",
+                                 $parsedReply->{rst}{settings},
+                                 [buildqueueplanetid => "Build Queue Planet: %s"],
+                                 [turn               => "Turn %s"],
+                                 [victorycountdown   => "Victory Countdown: %s"],
+                                 "\n",
+                                 [hoststart          => "Host started: %s"],
+                                 [hostcompleted      => "Host completed: %s"]);
+    push @result, rstEncryptMessage($text) if defined($text);
+
+    # Host config (from 'settings')
+    $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration >>>",
+                                 $parsedReply->{rst}{settings},
+                                 [cloakfail          => "Odds of cloak failure  %s %%"],
+                                 [maxions            => "Ion Storms             %s"],
+                                 [shipscanrange      => "Ships are visible at   %s"],
+                                 [structuredecayrate => "structure decay        %s"],
+                                 "\n",
+                                 [mapwidth           => "Map width              %s"],
+                                 [mapheight          => "Map height             %s"],
+                                 [maxallies          => "Maximum allies         %s"],
+                                 [numplanets         => "Number of planets      %s"],
+                                 [planetscanrange    => "Planets are visible at %s"]);
+    push @result, rstEncryptMessage($text) if defined($text);
+
+    # HConfig arrays
+    foreach ([freefighters=>"Free fighters at starbases", "%3s"],
+             [groundattack=>"Ground Attack Kill Ratio", "%3s : 1"],
+             [grounddefense=>"Ground Defense Kill Ratio", "%3s : 1"],
+             [miningrate=>"Mining rates", "%3s"],
+             [taxrate=>"Tax rates", "%3s"])
+      {
+          my $key = $_->[0];
+          my $fmt = $_->[2];
+          my $did = 0;
+          $text = "(-g0000)<<< Host Configuration >>>\n\n$_->[1]\n";
+          foreach my $r (@{$parsedReply->{rst}{races}}) {
+              if (exists($r->{$key}) && exists($r->{adjective})) {
+                  $text .= sprintf("  %-15s", $r->{adjective})
+                    . sprintf($fmt, $r->{$key})
+                      . "\n";
+                  $did = 1;
+              }
+          }
+          push @result, rstEncryptMessage($text) if $did;
+      }
+
+    @result;
+}
+
+sub rstSynthesizeMessage {
+    my $head = shift;
+    my $pHash = shift;
+    my $text = "$head\n\n";
+    my $did = 0;
+    my $gap = 1;
+    foreach (@_) {
+        if (ref) {
+            if (exists $pHash->{$_->[0]}) {
+                $text .= sprintf($_->[1], $pHash->{$_->[0]}) . "\n";
+                $did = 1;
+                $gap = 0;
+            }
+        } else {
+            $text .= $_ unless $gap;
+            $gap = 1;
+        }
+    }
+    return $did ? $text : undef;
 }
 
 sub rstPackShipXY {
