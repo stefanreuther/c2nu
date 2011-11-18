@@ -93,27 +93,15 @@ if ($cmd eq 'help') {
     doLogin();
 } elsif ($cmd eq 'list') {
     doList();
-} elsif ($cmd eq 'rst1') {
-    doResult1();
-} elsif ($cmd eq 'rst2') {
-    doResult2();
-} elsif ($cmd eq 'rst') {
-    doResult1();
-    doResult2();
-} elsif ($cmd eq 'dump1') {
-    doResult1();
-} elsif ($cmd eq 'dump2') {
-    doDump2();
-} elsif ($cmd eq 'dump') {
-    doResult1();
-    doDump2();
-} elsif ($cmd eq 'vcr1') {
-    doResult1();
-} elsif ($cmd eq 'vcr2') {
-    doVcr2();
-} elsif ($cmd eq 'vcr') {
-    doResult1();
-    doVcr2();
+} elsif ($cmd =~ /^rst([12]?)$/) {
+    doDownloadResult() unless $1 eq '2';
+    doWriteResult()    unless $1 eq '1';
+} elsif ($cmd =~ /^dump([12]?)$/) {
+    doDownloadResult() unless $1 eq '2';
+    doDump()           unless $1 eq '1';
+} elsif ($cmd =~ /^vcr([12]?)$/) {
+    doDownloadResult() unless $1 eq '2';
+    doWriteVcr()       unless $1 eq '1';
 } else {
     die "Invalid command '$cmd'\n";
 }
@@ -264,7 +252,7 @@ sub doList {
 #
 ######################################################################
 
-sub doVcr2 {
+sub doWriteVcr {
     # Read state
     open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
     my $body;
@@ -331,7 +319,7 @@ sub doVcr {
 #
 ######################################################################
 
-sub doResult1 {
+sub doDownloadResult {
     my $gameId;
     if (@ARGV == 0) {
         $gameId = stateGet('gameid');
@@ -369,7 +357,7 @@ sub doResult1 {
     }
 }
 
-sub doResult2 {
+sub doWriteResult {
     # Read state
     open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
     my $body;
@@ -697,7 +685,7 @@ sub makeUtilData {
 #
 ######################################################################
 
-sub doDump2 {
+sub doDump {
     # Read state
     open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
     my $body;
@@ -1501,7 +1489,6 @@ sub jsonParse1 {
     my $pstr = shift;
     $$pstr =~ m|\G\s*|sgc;
     if ($$pstr =~ m#\G"(([^\\"]+|\\.)*)"#gc) {
-        #print "json-string '$&'\n" if $opt_jsonDebug;
         my $s = $1;
         $s =~ s|\\(.)|stateUnquote($1)|eg;
         # Nu data is in UTF-8. Translate what we can to latin-1, because
@@ -1510,25 +1497,18 @@ sub jsonParse1 {
         # messages, and notes.
         utf8ToLatin1($s);
     } elsif ($$pstr =~ m|\G([-+]?\d+\.\d*)|gc) {
-        #print "json-float '$&'\n" if $opt_jsonDebug;
         $1;
     } elsif ($$pstr =~ m|\G([-+]?\.\d+)|gc) {
-        #print "json-fract '$&'\n" if $opt_jsonDebug;
         $1;
     } elsif ($$pstr =~ m|\G([-+]?\d+)|gc) {
-        #print "json-int '$&'\n" if $opt_jsonDebug;
         $1;
     } elsif ($$pstr =~ m|\Gtrue\b|gc) {
-        #print "json-true '$&'\n" if $opt_jsonDebug;
         1
     } elsif ($$pstr =~ m|\Gfalse\b|gc) {
-        #print "json-false '$&'\n" if $opt_jsonDebug;
         0
     } elsif ($$pstr =~ m|\Gnull\b|gc) {
-        #print "json-null '$&'\n" if $opt_jsonDebug;
         undef
     } elsif ($$pstr =~ m|\G\{|gc) {
-        #print "json-hash '$&'\n" if $opt_jsonDebug;
         my $result = {};
         while (1) {
             $$pstr =~ m|\G\s*|sgc;
@@ -1542,10 +1522,8 @@ sub jsonParse1 {
                 $result->{$key} = $val;
             }
         }
-        #print "json-endhash '$&'\n" if $opt_jsonDebug;
         $result;
     } elsif ($$pstr =~ m|\G\[|gc) {
-        #print "json-list '$&'\n" if $opt_jsonDebug;
         my $result = [];
         while (1) {
             $$pstr =~ m|\G\s*|sgc;
@@ -1553,7 +1531,6 @@ sub jsonParse1 {
             elsif ($$pstr =~ m|\G,|gc) { }
             else { push @$result, jsonParse1($pstr) }
         }
-        #print "json-endlist '$&'\n" if $opt_jsonDebug;
         $result;
     } else {
         die "JSON syntax error: expecting element, got '" . substr($$pstr, pos($$pstr), 20) . "'.\n";
@@ -1614,7 +1591,7 @@ sub jsonDump {
         } elsif ($tree =~ /^-?\d+$/) {
             print $tree;
         } else {
-            $tree =~ s/([\\"])/\\$1/g;
+            $tree =~ s/([\\\"])/\\$1/g;
             print '"', stateQuote($tree), '"';
         }
     }
