@@ -60,7 +60,7 @@ use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicod
 my $opt_rootDir = "/usr/share/planets";
 
 # Initialisation
-stateSet('host', 'vgaplanets.nu');
+stateSet('host', 'planets.nu');
 stateLoad();
 
 # Parse arguments
@@ -345,6 +345,9 @@ sub doDownloadResult {
     my $parsedReply = jsonParse($reply->{BODY});
     if (!exists $parsedReply->{rst}) {
         print STDERR "WARNING: request probably did not succeed.\n";
+        if (exists $parsedReply->{error}) {
+            print STDERR "WARNING: error message is:\n\t", $parsedReply->{error}, "\n";
+        }
     } else {
         if (stateGet('backups')) {
             print "Making backup...\n";
@@ -1433,6 +1436,11 @@ sub httpCall {
     }
     close HTTP;
 
+    # Check status
+    if ($reply{STATUS} != 200) {
+        print STDERR "WARNING: HTTP status is $reply{STATUS}.\n";
+    }
+
     # Body might be compressed; decompress it
     if (lc($reply{'content-encoding'}) eq 'gzip') {
         print "Decompressing result...\n";
@@ -1450,7 +1458,6 @@ sub httpCall {
         }
         close TMP;
     }
-
 
     $reply{BODY} = $replybody;
     \%reply;
