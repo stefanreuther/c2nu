@@ -905,6 +905,7 @@ sub rstPackBases {
 sub rstPackMessages {
     my $parsedReply = shift;
     my $player = shift;
+    my $turn = $parsedReply->{rst}{settings}{turn};
     my @result;
 
     # I have not yet seen all of these.
@@ -922,19 +923,25 @@ sub rstPackMessages {
                      "(-x0000)<<< Explosion >>>",           # 10 'Explosion',
                      "(-d%04d)<<< Space Dock Message >>>",  # 11 'Starbase',
                      "(-w%04d)<<< Web Mines >>>",           # 12 'Web Mines',
-                     "(-y%04d)<<< Meteor >>>",              # xx 13 'Meteors',
-                     "(-z%04d)<<< Sensor Sweep >>>",        # xx 14 'Sensor Sweep',
+                     "(-y%04d)<<< Meteor >>>",              # 13 'Meteors',
+                     "(-z%04d)<<< Sensor Sweep >>>",        # 14 'Sensor Sweep',
                      "(-z%04d)<<< Bio Scan >>>",            # xx 15 'Bio Scan',
                      "(-e%04d)<<< Distress Call >>>",       # xx 16 'Distress Call',
-                     "(-r%04d)<<< Subspace Message >>>",    # xx 17 'Player',
-                     "(-h0000)<<< Diplomacy >>>",           # xx 18 'Diplomacy',
-                     "(-m%04d)<<< Mine Scan >>>",           # xx 19 'Mine Scan',
+                     "(-r%X000)<<< Subspace Message >>>",   # 17 'Player',
+                     "(-h0000)<<< Diplomacy >>>",           # 18 'Diplomacy',
+                     "(-m%04d)<<< Mine Scan >>>",           # 19 'Mine Scan',
                      "(-9%04d)<<< Captain's Log >>>",       # xx  20 'Dark Sense',
                      "(-9%04d)<<< Sub Space Message >>>",   # xx 21 'Hiss'
                 );
 
     # Build message list
-    foreach my $m (sort {$b->{id} <=> $a->{id}} @{$parsedReply->{rst}{messages}}) {
+    # 'messages' is regular inbox
+    # 'mymessages' is diplomacy messages and outbox since 23/Nov/2011.
+    my @messages = @{$parsedReply->{rst}{messages}};
+    if (exists $parsedReply->{rst}{mymessages}) {
+        push @messages, @{$parsedReply->{rst}{mymessages}};
+    }
+    foreach my $m (sort {$b->{id} <=> $a->{id}} grep {$_->{turn} == $turn} @messages) {
         my $head = rstFormatMessage("From: $m->{headline}");
         my $body = rstFormatMessage($m->{body});
         my $template = ($m->{messagetype} >= 0 && $m->{messagetype} < @templates ? $templates[$m->{messagetype}] : "(-h0000)<<< Sub Space Message >>>");
@@ -1598,7 +1605,6 @@ sub jsonDump {
         } elsif ($tree =~ /^-?\d+$/) {
             print $tree;
         } else {
-            $tree =~ s/([\\\"])/\\$1/g;
             print '"', stateQuote($tree), '"';
         }
     }
