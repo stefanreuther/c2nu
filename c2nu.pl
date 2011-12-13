@@ -25,13 +25,19 @@
 #  Commands:
 #    help           Help screen (no network access)
 #    status         Show state file content (no network access)
-#    login U PW     Log in with user Id and password
+#    login USER PW  Log in with user Id and password
 #    list           List games (must be logged in)
+#if CMD_RST
 #    rst [GAME]     Download Nu RST (must be logged in). GAME is the game
 #                   number and can be omitted on second and later uses.
 #                   Convert the Nu RST file to VGAP RST.
+#endif
+#if CMD_DUMP
 #    dump [GAME]    Download Nu RST and dump beautified JSON.
+#endif
+#if CMD_VCR
 #    vcr [GAME]     Download Nu RST and create VGAP VCRx.DAT for PlayVCR.
+#endif
 #
 #  All download commands can be split in two halves, i.e. "vcr1 [GAME]"
 #  to perform the download, and "vcr2" to convert the download without
@@ -41,7 +47,7 @@
 #  - make a directory and go there using the command prompt
 #  - log in using 'c2nu --host=planets.nu login USER PASS'
 #  - list games using 'c2nu list'
-#  - download a game using 'c2nu --root=DIR rst', where DIR is the
+#  - download stuff using 'c2nu --root=DIR vcr', where DIR is the
 #    directory containing your VGA Planets installation, or PCC2's
 #    'specs' direcory. Alternatively, copy a 'hullfunc.dat' file
 #    into the current directory before downloading the game.
@@ -81,7 +87,7 @@ while (@ARGV) {
 
 # Command switch
 if (!@ARGV) {
-    die "Missing command name.\n";
+    die "Missing command name. '$0 --help' for help.\n";
 }
 my $cmd = shift @ARGV;
 $cmd =~ s/^--?//;
@@ -93,15 +99,21 @@ if ($cmd eq 'help') {
     doLogin();
 } elsif ($cmd eq 'list') {
     doList();
+#if CMD_RST
 } elsif ($cmd =~ /^rst([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
     doWriteResult()    unless $1 eq '1';
+#endif
+#if CMD_DUMP
 } elsif ($cmd =~ /^dump([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
     doDump()           unless $1 eq '1';
+#endif
+#if CMD_VCR
 } elsif ($cmd =~ /^vcr([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
     doWriteVcr()       unless $1 eq '1';
+#endif
 } else {
     die "Invalid command '$cmd'\n";
 }
@@ -114,30 +126,32 @@ exit 0;
 #
 ######################################################################
 sub doHelp {
-    print <<EOF;
-$0 - vgaplanets.nu interface
-
-$0 [options] command [command args]
-
-Options:
-  --host=HOST       instead of 'vgaplanets.nu'
-  --backups=0/1     disable/enable backup of Nu RST
-  --root=DIR        set root directory containing VGA Planets spec files
-
-Commands:
-  help              this help screen
-  status            show status
-  login USER PASS   log in
-  list              list games
-  rst [GAME]        download Nu RST and convert to VGAP RST
-  dump [GAME]       download Nu RST and dump JSON
-  vcr [GAME]        download Nu RST and create VGAP VCRx.DAT
-
-Download commands can be split into the download part ('vcr1') and the
-convert part ('vcr2').
-EOF
+    print "$0 - vgaplanets.nu interface\n\n";
+    print "$0 [options] command [command args]\n\n";
+    print "Options:\n";
+    print "  --host=HOST       instead of 'vgaplanets.nu'\n";
+    print "  --backups=0/1     disable/enable backup of Nu RST\n";
+    print "  --root=DIR        set root directory containing VGA Planets spec files\n\n";
+    print "Commands:\n";
+    print "  help              this help screen\n";
+    print "  status            show status\n";
+    print "  login USER PASS   log in\n";
+    print "  list              list games\n";
+#if CMD_RST
+    print "  rst [GAME]        download Nu RST and convert to VGAP RST\n";
+#endif
+#if CMD_DUMP
+    print "  dump [GAME]       download Nu RST and dump JSON\n";
+#endif
+#if CMD_VCR
+    print "  vcr [GAME]        download Nu RST and create VGAP VCRx.DAT\n";
+#endif
+    print "\n";
+    print "Download commands can be split into the download part ('vcr1') and the\n";
+    print "convert part ('vcr2').\n";
 }
 
+#autosplit
 ######################################################################
 #
 #  Log in
@@ -310,6 +324,9 @@ sub doVcr {
     binmode VCR;
     print VCR $vcrs;
     close VCR;
+    if (length($vcrs) < 100) {
+        print "++ You do not have any VCRs this turn. ++\n";
+    }
 }
 
 
@@ -951,7 +968,7 @@ sub rstPackMessages {
         # the message, unless it's already there.
         # Nu often uses '( 1234, 5678 )' for coordiantes. Strip the blanks to
         # make it look better.
-        $body =~ s/\( +(\d+, *\d+) +\)/($1)/g;
+        $msg =~ s/\( +(\d+, *\d+) +\)/($1)/g;
         if ($m->{x} && $m->{y} && $msg !~ m|\($m->{x}, *$m->{y}\)|) {
             $msg .= "\n\nLocation: ($m->{x}, $m->{y})";
         }
@@ -1774,3 +1791,4 @@ sub utf8ToLatin1 {
     $s =~ s/([\xC0-\xC3])([\x80-\xBF])/chr(((ord($1) & 3) << 6) + (ord($2) & 63))/eg;
     $s;
 }
+#end

@@ -1,0 +1,115 @@
+c2nuvcr.pl - planets.nu interface
+==================================
+
+  This program imports planets.nu combat data into PCC2/PlayVCR for
+  watching and simulation.
+
+
+
+Requirements
+-------------
+
+  The program is written in Perl. You need a Perl interpreter. Since
+  the planets.nu server sends compressed data, you also need the gzip
+  program which c2nuvcr uses to decompress it.
+
+  Type "perl --version" and "gzip --version" at a shell prompt to see
+  whether you have these programs.
+
+  Any Linux distribution should work. Under Windows, I have tried with
+  Cygwin.
+
+  You should also have PCC2 1.99.16, which have specific support for
+  NuHost VCR (older versions will work, but may differ by a few
+  percentage points in rare cases, see below.)
+
+
+
+Step by Step
+-------------
+
+  (1) Create a directory to work in. For simplicity, drop the
+      c2nuvcr.pl program in it (c2nuvcr.pl does not require that; if
+      you know your way around shell prompts, you can adapt the
+      following instructions to different locations). Open a shell
+      prompt and navigate there.
+
+
+  (2) Log in to planets.nu:
+
+        perl c2nuvcr.pl login YOUR_USERNAME_HERE YOUR_PASSWORD_HERE
+
+      This will talk to the server like your web browser would do,
+      verify the password, and create a state file. It should say
+      "++ Login succeeded ++" at the end.
+
+
+  (3) List your games:
+
+        perl c2nuvcr.pl list
+
+
+  (4) Download the game you want to watch:
+
+        perl c2nuvcr.pl --root="C:\Program Files\PCC2\specs" vcr GAME_NUMBER_HERE
+
+      "C:\Program Files\PCC2" is the folder you have installed PlayVCR
+      to. c2nuvcr.pl needs this folder to generate proper VGA Planets
+      compatible files.
+
+      This will create shiplist files and a VCR file.
+
+
+  (5) Start PlayVCR, passing it the name of the VCR file as a
+      parameter
+
+        "C:\Program Files\PCC2\playvcr" vcr7.dat
+
+      (alternatively, start PlayVCR normally, and use its file browser
+      to navigate to the file.)
+
+      PlayVCR 1.99.16 or newer will recognize the fight as having been
+      hosted by NuHost. You can watch these battles like usual.
+
+      The simulator can also be switched to NuHost mode (Ctrl+O, then
+      option P).
+
+
+  (6) c2nuvcr remembers the last parameters you used to access a game.
+      When you download the next turn, you only need to specify the
+      "vcr" verb, and can omit the other parameters:
+
+        perl c2nuvcr.pl vcr
+
+
+  There are a few more options; use 'perl c2nuvcr.pl --help' to see
+  them.
+
+
+
+How precise is it?
+-------------------
+
+  PlayVCR 1.99.16 emulates the VCR used by the browser client. This
+  VCR implementation is close to the original Tim-VCR and is actually
+  based upon PlayVCR's Tim-VCR implementation, but has occasional
+  rounding differences (Tim-VCR: ERND, browser client: ROUND).
+
+  Since there are known cases where the browser client and the host
+  disagree in rounding (e.g., taxation income seems to be computed
+  using exact Tim-Host formulas using ERND, but the client uses
+  ROUND), it remains to evaluate whether PlayVCR-trying-to-be-NuHost
+  actually matches NuHost. Also, the exact balancing algorithm is
+  unknown to me.
+
+
+
+Fine Print
+-----------
+
+  This program is (c) 2011 Stefan Reuther.
+
+  Send comments, questions, bug reports, and praise to <streu@gmx.de>.
+
+
+-end-
