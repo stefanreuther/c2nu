@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 #
-#  vgaplanets.nu interface
+#  planets.nu interface
 #
 #  This script accesses the Nu server by HTTP and converts between Nu
 #  data and VGA Planets data. It operates in the current directory. It
@@ -62,7 +62,7 @@ use Socket;
 use IO::Handle;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-#my $opt_jsonDebug = 1;
+my $VERSION = "0.1";
 my $opt_rootDir = "/usr/share/planets";
 
 # Initialisation
@@ -115,7 +115,7 @@ if ($cmd eq 'help') {
     doWriteVcr()       unless $1 eq '1';
 #endif
 } else {
-    die "Invalid command '$cmd'\n";
+    die "Invalid command '$cmd'. '$0 --help' for help\n";
 }
 stateSave();
 exit 0;
@@ -126,10 +126,10 @@ exit 0;
 #
 ######################################################################
 sub doHelp {
-    print "$0 - vgaplanets.nu interface\n\n";
+    print "$0 - planets.nu interface - version $VERSION, (c) 2011 Stefan Reuther\n\n";
     print "$0 [options] command [command args]\n\n";
     print "Options:\n";
-    print "  --host=HOST       instead of 'vgaplanets.nu'\n";
+    print "  --host=HOST       instead of 'planets.nu'\n";
     print "  --backups=0/1     disable/enable backup of Nu RST\n";
     print "  --root=DIR        set root directory containing VGA Planets spec files\n\n";
     print "Commands:\n";

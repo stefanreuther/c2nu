@@ -19,7 +19,7 @@ Requirements
   Any Linux distribution should work. Under Windows, I have tried with
   Cygwin.
 
-  You should also have PCC2 1.99.16, which have specific support for
+  You should also have PCC2 1.99.16, which has specific support for
   NuHost VCR (older versions will work, but may differ by a few
   percentage points in rare cases, see below.)
 
@@ -47,6 +47,9 @@ Step by Step
   (3) List your games:
 
         perl c2nuvcr.pl list
+
+      This step is optional, but useful to verify that c2nuvcr can
+      actually talk to the web server.
 
 
   (4) Download the game you want to watch:
@@ -96,11 +99,11 @@ How precise is it?
   rounding differences (Tim-VCR: ERND, browser client: ROUND).
 
   Since there are known cases where the browser client and the host
-  disagree in rounding (e.g., taxation income seems to be computed
-  using exact Tim-Host formulas using ERND, but the client uses
-  ROUND), it remains to evaluate whether PlayVCR-trying-to-be-NuHost
-  actually matches NuHost. Also, the exact balancing algorithm is
-  unknown to me.
+  disagree in rounding in the very same way (e.g., taxation income
+  seems to be computed using exact Tim-Host formulas using ERND, but
+  the client uses ROUND), it remains to evaluate whether
+  PlayVCR-trying-to-be-NuHost actually matches NuHost. Also, the exact
+  balancing algorithm is unknown to me.
 
 
 
