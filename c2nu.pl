@@ -33,7 +33,8 @@
 #                   Convert the Nu RST file to VGAP RST.
 #endif
 #if CMD_UNPACK
-#    unpack [GAME]  Download Nu RST and create DAT/DIS files.
+#    unpack [GAME]  Download Nu RST and create DAT/DIS files. This has the
+#                   advantage of leaving undo information for building.
 #endif
 #if CMD_DUMP
 #    dump [GAME]    Download Nu RST and dump beautified JSON.
