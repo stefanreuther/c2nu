@@ -32,6 +32,9 @@
 #                   number and can be omitted on second and later uses.
 #                   Convert the Nu RST file to VGAP RST.
 #endif
+#if CMD_UNPACK
+#    unpack [GAME]  Download Nu RST and create DAT/DIS files.
+#endif
 #if CMD_DUMP
 #    dump [GAME]    Download Nu RST and dump beautified JSON.
 #endif
@@ -103,6 +106,11 @@ if ($cmd eq 'help') {
 } elsif ($cmd =~ /^rst([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
     doWriteResult()    unless $1 eq '1';
+#endif
+#if CMD_UNPACK
+} elsif ($cmd =~ /^unpack([12]?)$/) {
+    doDownloadResult() unless $1 eq '2';
+    doUnpack()         unless $1 eq '1';
 #endif
 #if CMD_DUMP
 } elsif ($cmd =~ /^dump([12]?)$/) {
@@ -284,36 +292,10 @@ sub doWriteVcr {
 sub doVcr {
     # Fetch parameter
     my $parsedReply = shift;
-    if (!exists $parsedReply->{rst}) {
-        die "ERROR: no result file received\n";
-    }
-    if (!$parsedReply->{rst}{player}{raceid}) {
-        die "ERROR: result does not contain player name\n";
-    }
-    if ($parsedReply->{rst}{player}{savekey} ne $parsedReply->{savekey}) {
-        die "ERROR: received two different savekeys\n"
-    }
-    stateSet('savekey', $parsedReply->{savekey});
-    stateSet('player', $parsedReply->{rst}{player}{raceid});
+    stateCheckReply($parsedReply);
 
     # Make spec files
-    makeSpecFile($parsedReply->{rst}{beams}, "beamspec.dat", 10, "A20v8", 36,
-                 qw(name cost tritanium duranium molybdenum mass techlevel crewkill damage));
-    makeSpecFile($parsedReply->{rst}{torpedos}, "torpspec.dat", 10, "A20v9", 38,
-                 qw(name torpedocost launchercost tritanium duranium molybdenum mass techlevel crewkill damage));
-    makeSpecFile($parsedReply->{rst}{engines}, "engspec.dat", 9, "A20v5V9", 66,
-                 qw(name cost tritanium duranium molybdenum techlevel warp1 warp2 warp3 warp4 warp5 warp6 warp7 warp8 warp9));
-    makeSpecFile($parsedReply->{rst}{hulls}, "hullspec.dat", 105, "A30v15", 60,
-                 qw(name zzimage zzunused tritanium duranium molybdenum fueltank
-                    crew engines mass techlevel cargo fighterbays launchers beams cost));
-    makeSpecFile($parsedReply->{rst}{planets}, "xyplan.dat", 500, "v3", 6,
-                 qw(x y ownerid));
-    makeSpecFile($parsedReply->{rst}{planets}, "planet.nm", 500, "A20", 20,
-                 qw(name));
-
-    # Make more spec files
-    makeHullfuncFile($parsedReply->{rst}{hulls});
-    makeTruehullFile($parsedReply->{rst}{racehulls}, $parsedReply->{rst}{player}{raceid});
+    makeAllSpecFiles($parsedReply);
 
     # Make result
     my $player = $parsedReply->{rst}{player}{id};
@@ -395,35 +377,26 @@ sub doWriteResult {
 sub doResult {
     # Fetch parameter
     my $parsedReply = shift;
-    if (!exists $parsedReply->{rst}) {
-        die "ERROR: no result file received\n";
-    }
-    if (!$parsedReply->{rst}{player}{raceid}) {
-        die "ERROR: result does not contain player name\n";
-    }
-    if ($parsedReply->{rst}{player}{savekey} ne $parsedReply->{savekey}) {
-        die "ERROR: received two different savekeys\n"
-    }
-    stateSet('savekey', $parsedReply->{savekey});
-    stateSet('player', $parsedReply->{rst}{player}{raceid});
+    stateCheckReply($parsedReply);
 
-    # Find timestamp. It has the format
-    #  8/12/2011 9:00:13 PM
-    #  8/7/2011 1:33:42 PM
-    my @time = split m|[/: ]+|, $parsedReply->{rst}{settings}{hoststart};
-    if (@time != 7) {
-        print "WARNING: unable to figure out a reliable timestamp\n";
-        while (@time < 7) {
-            push @time, 0;
-        }
-    } else {
-        # Convert to international time format
-        if ($time[3] == 12) { $time[3] = 0 }
-        if ($time[4] eq 'PM') { $time[3] += 12 }
-    }
-    my $timestamp = substr(sprintf("%02d-%02d-%04d%02d:%02d:%02d", @time), 0, 18);
+    # Timestamp
+    my $timestamp = rstMakeTimeStamp($parsedReply);
 
-    # Make spec files
+    # Specs
+    makeAllSpecFiles($parsedReply);
+
+    # Make result
+    makeResult($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
+
+    # Make util.dat with assorted info
+    makeUtilData($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
+}
+
+# Make all specification files
+sub makeAllSpecFiles {
+    my $parsedReply = shift;
+
+    # Simple spec files
     makeSpecFile($parsedReply->{rst}{beams}, "beamspec.dat", 10, "A20v8", 36,
                  qw(name cost tritanium duranium molybdenum mass techlevel crewkill damage));
     makeSpecFile($parsedReply->{rst}{torpedos}, "torpspec.dat", 10, "A20v9", 38,
@@ -441,12 +414,6 @@ sub doResult {
     # Make more spec files
     makeHullfuncFile($parsedReply->{rst}{hulls});
     makeTruehullFile($parsedReply->{rst}{racehulls}, $parsedReply->{rst}{player}{raceid});
-
-    # Make result
-    makeResult($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
-
-    # Make util.dat with assorted info
-    makeUtilData($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
 }
 
 # Make specification file from data received within nu RST
@@ -698,6 +665,660 @@ sub makeUtilData {
     close UTIL;
 }
 
+######################################################################
+#
+#  Unpack
+#
+######################################################################
+
+sub doUnpack {
+    # Read state
+    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
+    my $body;
+    while (1) {
+        my $tmp;
+        if (!read(IN, $tmp, 4096)) { last }
+        $body .= $tmp;
+    }
+    close IN;
+    print "Parsing result...\n";
+    my $parsedReply = jsonParse($body);
+    stateCheckReply($parsedReply);
+
+    # Timestamp
+    my $timestamp = rstMakeTimeStamp($parsedReply);
+
+    # Specs
+    makeAllSpecFiles($parsedReply);
+
+    # Prepare
+    my $player = $parsedReply->{rst}{player}{id};
+    my $race = rstMapOwnerToRace($parsedReply, $player);
+    my $disSig = ' 'x10;
+    my $datSig = "!\"#\$%&'()*";
+    my $pControl = [replicate(2499, 0)];
+
+    # Flow tracking: for each coordinate:
+    #   tritaniumUsed, duraniumUsed, molybdenumUsed, cashUsed, suppliesUsed:
+    #       Resources used for building. Units that build add to these values.
+    #       Units that store these resources have this value added to their
+    #       old value.
+    #   torpXBuilt, fightersBuilt, cashMade:
+    #       Units built. Builders add to these values. Units that store these,
+    #       have this value removed from their old value.
+    my $pAdjust = {};
+
+    # Bases
+    my ($bdat, $bdis) = unpPackBases($parsedReply, $player, $pControl, $pAdjust);
+    unpWriteFile("bdata$race.dat", $bdat, $datSig);
+    unpWriteFile("bdata$race.dis", $bdis, $disSig);
+
+    # Planets
+    my ($pdat, $pdis) = unpPackPlanets($parsedReply, $player, $pControl, $pAdjust);
+    unpWriteFile("pdata$race.dat", $pdat, $datSig);
+    unpWriteFile("pdata$race.dis", $pdis, $disSig);
+
+    # Ships
+    my ($sdat, $sdis) = unpPackShips($parsedReply, $player, $pControl, $pAdjust);
+    unpWriteFile("ship$race.dat", $sdat, $datSig);
+    unpWriteFile("ship$race.dis", $sdis, $disSig);
+
+    # Simple files
+    unpWriteFile("target$race.dat", rstPackTargets($parsedReply, $player), $datSig);
+    unpWriteFile("vcr$race.dat",    rstPackVcrs($parsedReply, $player), $datSig);
+    unpWriteFile("shipxy$race.dat", rstPackShipXY($parsedReply, $player), $datSig);
+
+    # Messages
+    my @msgs = (rstPackMessages($parsedReply, $player),
+                rstSynthesizeMessages($parsedReply, $player));
+    unpWriteMessages("mdata$race.dat", @msgs);
+
+    # FIXME: save outgoing messages
+    unpWriteMessages("mess$race.dat", "\0\0");
+
+    # GEN
+    unpWriteFile("gen$race.dat", unpPackGen($parsedReply, $player,
+                                            $sdat.$datSig.$sdis.$disSig,
+                                            $pdat.$datSig.$pdis.$disSig,
+                                            $bdat.$datSig.$bdis.$disSig,
+                                            $timestamp));
+
+    # Control
+    unpWriteFile("contrl$race.dat", pack("V*", @$pControl));
+
+    # Remove files we don't create
+    foreach ("control.dat", "kore$race.dat", "skore$race.dat", "mess35$race.dat") {
+        if (unlink($_)) {
+            print "Removed $_.\n";
+        }
+    }
+
+    # Update indexes
+    unpUpdateIndex($race);
+
+    # Make util.dat with assorted info
+    makeUtilData($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
+
+    # Log failed flows
+    unpLogFailedFlows($pAdjust);
+}
+
+# Write a single file
+sub unpWriteFile {
+    my $fname = shift;
+    print "Making $fname...\n";
+    open OUT, "> $fname" or die "$fname: $!\n";
+    binmode OUT;
+    print OUT @_;
+    close OUT;
+}
+
+# Write messages
+sub unpWriteMessages {
+    my $fname = shift;
+    my $nmessages = @_;
+
+    # Create file
+    print "Making $fname...\n";
+    open OUT, "> $fname" or die "$fname: $!\n";
+    binmode OUT;
+
+    # Write preliminary header
+    print OUT 'x' x (($nmessages * 6) + 2);
+
+    # Write messages, generating header
+    my $header = pack('v', $nmessages);
+    foreach (@_) {
+        $header .= pack('Vv', tell(OUT)+1, length($_));
+        print OUT $_;
+    }
+
+    # Update header
+    seek OUT, 0, 0;
+    print OUT $header;
+    close OUT;
+}
+
+sub unpPackGen {
+    my $parsedReply = shift;
+    my $player = shift;
+    my $ships = shift;
+    my $planets = shift;
+    my $bases = shift;
+    my $timestamp = shift;
+
+    # Find turn number
+    my $turn = $parsedReply->{rst}{settings}{turn};
+
+    # Find scores
+    my @scores = replicate(44, 0);
+    foreach my $p (@{$parsedReply->{rst}{scores}}) {
+        if ($p->{ownerid} > 0 && $p->{ownerid} <= 11 && $p->{turn} == $turn) {
+            my $pos = ((rstMapOwnerToRace($parsedReply, $p->{ownerid}) - 1) * 4);
+            $scores[$pos] = $p->{planets};
+            $scores[$pos+1] = $p->{capitalships};
+            $scores[$pos+2] = $p->{freighters};
+            $scores[$pos+3] = $p->{starbases};
+        }
+    }
+
+    return $timestamp
+      . pack("v*", @scores)
+        . pack("v", rstMapOwnerToRace($parsedReply, $player))
+          . "NOPASSWORD          "
+            . '?'
+              . pack("V*",
+                     rstChecksum($ships),
+                     rstChecksum($planets),
+                     rstChecksum($bases))
+                . "\0\0          "
+                  . pack("v", $turn)
+                    . pack("v", rstChecksum($timestamp));
+}
+
+# Update init.tmp
+sub unpUpdateIndex {
+    my $race = shift;
+
+    # Read
+    my @index;
+    if (open(TMP, "< init.tmp")) {
+        my $txt;
+        binmode TMP;
+        read TMP, $txt, 22;
+        @index = unpack "v*", $txt;
+        close TMP;
+    }
+
+    # Update
+    while (@index < 11) { push @index, 0 }
+    $index[$race-1] = 1;
+    unpWriteFile("init.tmp", pack("v*", @index));
+}
+
+# Find a stock
+sub unpFindStock {
+    my $baseId = shift;
+    my $parsedReply = shift;
+    my $stockType = shift;
+    my $stockId = shift;
+    my $pStocks = $parsedReply->{rst}{stock};
+    foreach (@$pStocks) {
+        if ($_->{starbaseid} == $baseId && $_->{stocktype} == $stockType && $_->{stockid} == $stockId) {
+            return $_;
+        }
+    }
+    return {"amount"=>0, "builtamount"=>0};
+}
+
+sub unpAddCost {
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $built = shift;
+    my $item = shift;
+    my $costKey = shift;
+    $pAdjust->{$adjkey}{cashUsed} += $built * $item->{$costKey};
+    $pAdjust->{$adjkey}{tritaniumUsed} += $built * $item->{tritanium};
+    $pAdjust->{$adjkey}{duraniumUsed} += $built * $item->{duranium};
+    $pAdjust->{$adjkey}{molybdenumUsed} += $built * $item->{molybdenum};
+}
+
+sub unpAdjustProduce {
+    my $pOld = shift;
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $item = shift;
+    if ($$pOld < 0) {
+        # Remember that we built something but cannot store that flow
+        $pAdjust->{$adjkey}{$item} -= $$pOld;
+        $$pOld = 0;
+    }
+}
+
+sub unpAdjustConsume {
+    my $new = shift;
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $item = shift;
+    if (exists($pAdjust->{$adjkey}{$item})) {
+        my $old = $new - $pAdjust->{$adjkey}{$item};
+        if ($old < 0) {
+            $pAdjust->{$adjkey}{$item} = -$old;
+            return 0;
+        } else {
+            $pAdjust->{$adjkey}{$item} = 0;
+            return $old;
+        }
+    } else {
+        return $new;
+    }
+}
+
+sub unpAdjustUse {
+    my $new = shift;
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $item = shift;
+    if (exists($pAdjust->{$adjkey}{$item})) {
+        $new += $pAdjust->{$adjkey}{$item};
+        $pAdjust->{$adjkey}{$item} = 0;
+    }
+    return $new;
+}
+
+sub unpLogFailedFlows {
+    my $pAdjust = shift;
+    my @log;
+    foreach my $xy (sort keys %$pAdjust) {
+        my $item = "Location $xy:\n";
+        my $did = 0;
+        foreach (sort keys %{$pAdjust->{$xy}}) {
+            if ($pAdjust->{$xy}{$_}) {
+                $item .= "  $_ = $pAdjust->{$xy}{$_}\n";
+                $did = 1;
+            }
+        }
+        push @log, "$item\n" if $did;
+    }
+
+    if (@log) {
+        printf "WARNING: %d flows not resolved, see c2flow.txt.\n", scalar(@log);
+        open LOG, "> c2flow.txt" or die "c2flow.txt: $!\n";
+        print LOG @log;
+        close LOG;
+    } else {
+        unlink "c2flow.txt";
+    }
+}
+
+sub unpPackBases {
+    my ($parsedReply, $player, $pControl, $pAdjust) = @_;
+
+    my @dat;
+    my @dis;
+    my @myHulls = @{$parsedReply->{rst}{racehulls}};
+    while (@myHulls < 20) { push @myHulls, 0 }
+
+    foreach my $base (@{$parsedReply->{rst}{starbases}}) {
+        # Since we're getting allied bases as well, we must filter here
+        next if rstGetBaseOwner($base, $parsedReply) != $player;
+
+        # Flow tracking
+        my $planet = asearch($parsedReply->{rst}{planets}, 'id', $base->{planetid}, { x=>0, y=>0 });
+        my $adjkey = $planet->{x} . "," . $planet->{y};
+
+        # Id, Owner
+        my $dat = pack("v2", $base->{planetid}, rstMapOwnerToRace($parsedReply, $player));
+        my $dis = $dat;
+
+        # Defense
+        $dat .= pack("v", $base->{defense});
+        $dis .= pack("v", $base->{defense} - $base->{builtdefense});
+        $pAdjust->{$adjkey}{cashUsed} += 10*$base->{builtdefense};
+        $pAdjust->{$adjkey}{duraniumUsed} += $base->{builtdefense};
+
+        # Damage
+        $dat .= pack("v", $base->{damage});
+        $dis .= pack("v", $base->{damage});
+
+        # Tech
+        foreach(qw(engine hull beam torp)) {
+            my $new = $base->{$_."techlevel"};
+            my $old = $base->{$_."techlevel"} - $base->{$_."techup"};
+            $dat .= pack("v", $new);
+            $dis .= pack("v", $old);
+            $pAdjust->{$adjkey}{cashUsed} += 50*$new*($new-1) - 50*$old*($old-1);
+        }
+
+        # Engines
+        foreach (1 .. 9) {
+            my $stock = unpFindStock($base->{id}, $parsedReply, 2, $_);
+            my $engine = asearch($parsedReply->{rst}{engines}, "id", $_);
+            $dat .= pack("v", $stock->{amount});
+            $dis .= pack("v", $stock->{amount} - $stock->{builtamount});
+            unpAddCost($pAdjust, $adjkey, $stock->{builtamount}, $engine, 'cost');
+        }
+
+        # Hulls
+        foreach (@myHulls) {
+            if ($_) {
+                my $stock = unpFindStock($base->{id}, $parsedReply, 1, $_);
+                my $hull = asearch($parsedReply->{rst}{hulls}, "id", $_);
+                $dat .= pack("v", $stock->{amount});
+                $dis .= pack("v", $stock->{amount} - $stock->{builtamount});
+                unpAddCost($pAdjust, $adjkey, $stock->{builtamount}, $hull, 'cost');
+            } else {
+                $dat .= "\0\0";
+                $dis .= "\0\0";
+            }
+        }
+
+        # Beams
+        foreach (1 .. 10) {
+            my $stock = unpFindStock($base->{id}, $parsedReply, 3, $_);
+            my $beam = asearch($parsedReply->{rst}{beams}, "id", $_);
+            $dat .= pack("v", $stock->{amount});
+            $dis .= pack("v", $stock->{amount} - $stock->{builtamount});
+            unpAddCost($pAdjust, $adjkey, $stock->{builtamount}, $beam, 'cost');
+        }
+
+        # Launchers
+        foreach (1 .. 10) {
+            my $stock = unpFindStock($base->{id}, $parsedReply, 4, $_);
+            my $tube = asearch($parsedReply->{rst}{torpedos}, "id", $_);
+            $dat .= pack("v", $stock->{amount});
+            $dis .= pack("v", $stock->{amount} - $stock->{builtamount});
+            unpAddCost($pAdjust, $adjkey, $stock->{builtamount}, $tube, 'launchercost');
+        }
+
+        # Torps
+        foreach (1 .. 10) {
+            my $stock = unpFindStock($base->{id}, $parsedReply, 4, $_);
+            my $tube = asearch($parsedReply->{rst}{torpedos}, "id", $_);
+            my $new = $stock->{amount};
+            my $old = $stock->{amount} - $stock->{builtamount};
+            unpAdjustProduce(\$old, $pAdjust, $adjkey, "torp".$_."Built");
+            $dat .= pack("v", $new);
+            $dis .= pack("v", $old);
+            $pAdjust->{$adjkey}{cashUsed} += $stock->{builtamount} * $tube->{torpedocost};
+            $pAdjust->{$adjkey}{tritaniumUsed} += $stock->{builtamount};
+            $pAdjust->{$adjkey}{duraniumUsed} += $stock->{builtamount};
+            $pAdjust->{$adjkey}{molybdenumUsed} += $stock->{builtamount};
+        }
+
+        # Fighters
+        {
+            my $new = $base->{fighters};
+            my $old = $base->{fighters} - $base->{builtfighters};
+            unpAdjustProduce(\$old, $pAdjust, $adjkey, "fightersBuilt");
+            $dat .= pack("v", $new);
+            $dis .= pack("v", $old);
+            $pAdjust->{$adjkey}{cashUsed} += $base->{builtfighters} * 100;
+            $pAdjust->{$adjkey}{tritaniumUsed} += $base->{builtfighters} * 3;
+            $pAdjust->{$adjkey}{molybdenumUsed} += $base->{builtfighters} * 2;
+        }
+
+        # Missions
+        $dat .= pack("v3", $base->{targetshipid}, $base->{shipmission}, $base->{mission});
+        $dis .= pack("v3", 0,                     0,                    $base->{mission});
+
+        # Build order
+        my $buildSlot = 0;
+        if ($base->{isbuilding}) {
+            for (0 .. $#myHulls) {
+                if ($base->{buildhullid} == $myHulls[$_]) {
+                    $buildSlot = $_+1;
+                    last;
+                }
+            }
+            if (!$buildSlot) {
+                print STDERR "WARNING: base $base->{planetid} is building a ship that you cannot build\n";
+            }
+        }
+        $dat .= pack("v7", $buildSlot, $base->{buildengineid}, $base->{buildbeamid}, $base->{buildbeamcount},
+                     $base->{buildtorpedoid}, $base->{buildtorpcount}, 0);
+        $dis .= pack("v7", 0, 0, 0, 0, 0, 0, 0);
+
+        # Remember
+        push @dat, $dat;
+        push @dis, $dis;
+        $pControl->[$base->{planetid} + 999] = rstChecksum($dat);
+    }
+
+    (pack("v", scalar(@dat)) . join('', @dat),
+     pack("v", scalar(@dis)) . join('', @dis));
+}
+
+sub unpPackPlanets {
+    my ($parsedReply, $player, $pControl, $pAdjust) = @_;
+
+    my @dat;
+    my @dis;
+
+    # This field list is dually-used for packing and filtering.
+    # A planet is included in the result if it has at least one
+    # of those fields with a sensible value.
+    my @fields = qw(mines factories defense
+                    neutronium tritanium duranium molybdenum
+                    clans supplies megacredits
+                    groundneutronium groundtritanium groundduranium groundmolybdenum
+                    densityneutronium densitytritanium densityduranium densitymolybdenum
+                    colonisttaxrate nativetaxrate
+                    colonisthappypoints nativehappypoints
+                    nativegovernment
+                    nativeclans
+                    nativetype);
+    my @structCosts = (4, 3, 10);
+    foreach my $planet (@{$parsedReply->{rst}{planets}}) {
+        if ($planet->{friendlycode} ne '???' || grep {$planet->{$_} > 0} @fields) {
+            # Flow tracking
+            my $adjkey = $planet->{x} . "," . $planet->{y};
+
+            # Id, owner
+            my $dat = pack("vvA3",
+                           rstMapOwnerToRace($parsedReply, $planet->{ownerid}),
+                           $planet->{id},
+                           $planet->{friendlycode});
+            my $dis = $dat;
+
+            if ($planet->{ownerid} == $player) {
+                # Structures
+                foreach (0 .. 2) {
+                    my $built = $planet->{"built".$fields[$_]};
+                    my $new = $planet->{$fields[$_]};
+                    my $old = $new - $built;
+                    $dat .= pack("v", $new);
+                    $dis .= pack("v", $old);
+                    $pAdjust->{$adjkey}{suppliesUsed} += $built;
+                    $pAdjust->{$adjkey}{cashUsed} += $structCosts[$_] * $built;
+                }
+
+                # Minerals
+                foreach (qw(neutronium tritanium duranium molybdenum)) {
+                    my $new = $planet->{$_};
+                    my $old = unpAdjustUse($new, $pAdjust, $adjkey, $_."Used");
+                    $dat .= pack("V", $new);
+                    $dis .= pack("V", $old);
+                }
+
+                # Clans
+                $dat .= pack("V", $planet->{clans});
+                $dis .= pack("V", $planet->{clans});
+
+                # Supplies and MC
+                my $newMC = $planet->{megacredits};
+                my $oldMC = $planet->{megacredits} - $planet->{suppliessold};
+                my $newSup = $planet->{supplies};
+                my $oldSup = $planet->{supplies} + $planet->{suppliessold};
+
+                $oldSup = unpAdjustUse($oldSup, $pAdjust, $adjkey, "suppliesUsed");
+                $oldMC  = unpAdjustUse($oldMC,  $pAdjust, $adjkey, "cashUsed");
+
+                if ($oldMC < 0) {
+                    $pAdjust->{$adjkey}{cashMade} -= $oldMC;
+                    $oldMC = 0;
+                }
+
+                $dat .= pack("VV", $newSup, $newMC);
+                $dis .= pack("VV", $oldSup, $oldMC);
+            } else {
+                my $v = rstPackFields($planet, "v3V7", qw(mines factories defense
+                                                          neutronium tritanium duranium molybdenum
+                                                          clans supplies megacredits));
+                $dat .= $v;
+                $dis .= $v;
+            }
+
+            # Ground, Natives, Taxes
+            my $env = rstPackFields($planet, "V4v9Vv",
+                                    qw(groundneutronium groundtritanium groundduranium groundmolybdenum
+                                       densityneutronium densitytritanium densityduranium densitymolybdenum
+                                       colonisttaxrate nativetaxrate
+                                       colonisthappypoints nativehappypoints
+                                       nativegovernment
+                                       nativeclans
+                                       nativetype));
+            $env .= pack("v", $planet->{temp} >= 0 ? 100 - $planet->{temp} : -1);
+            $env .= pack("v", $planet->{buildingstarbase});
+            $dat .= $env;
+            $dis .= $env;
+
+            push @dat, $dat;
+            push @dis, $dis;
+
+            $pControl->[$planet->{id} + 499] = rstChecksum($dat);
+        }
+    }
+
+    (pack("v", scalar(@dat)) . join('', @dat),
+     pack("v", scalar(@dis)) . join('', @dis));
+}
+
+sub unpPackShips {
+    my ($parsedReply, $player, $pControl, $pAdjust) = @_;
+
+    my @dat;
+    my @dis;
+
+    foreach my $ship (@{$parsedReply->{rst}{ships}}) {
+        if ($ship->{ownerid} == $player) {
+            # Flow tracking
+            my $adjkey = $ship->{x} . "," . $ship->{y};
+
+            # Id, owner, fcode, warp, location, most specs
+            my $dat = rstPackFields($ship, "v", qw(id));
+            $dat .= pack("v", rstMapOwnerToRace($parsedReply, $ship->{ownerid}));
+            $dat .= rstPackFields($ship,
+                                  "A3v",
+                                  qw(friendlycode warp));
+            $dat .= pack("vv",
+                         $ship->{targetx} - $ship->{x},
+                         $ship->{targety} - $ship->{y});
+            $dat .= rstPackFields($ship,
+                                  "v8",
+                                  qw(x y engineid hullid beamid beams bays torpedoid));
+            my $dis = $dat;
+
+            # Ammo
+            my $newAmmo = $ship->{ammo};
+            my $oldAmmo = $newAmmo;
+            if ($ship->{torps} > 0) {
+                $oldAmmo = unpAdjustConsume($oldAmmo, $pAdjust, $adjkey, "torp".$ship->{torpedoid}."Built");
+            }
+            if ($ship->{bays} > 0) {
+                $oldAmmo = unpAdjustConsume($oldAmmo, $pAdjust, $adjkey, "fightersBuilt");
+            }
+            $dat .= pack("v", $newAmmo);
+            $dis .= pack("v", $oldAmmo);
+
+            # Torp type
+            $dat .= pack("v", $ship->{torps});
+            $dis .= pack("v", $ship->{torps});
+
+            # Mission
+            my $msn;
+            if ($ship->{mission} >= 0) {
+                # Missions are off-by-one!
+                $msn = pack("v", $ship->{mission} + 1);
+            } else {
+                $msn = pack("v", $ship->{mission});
+            }
+            $msn .= pack("v", rstMapOwnerToRace($parsedReply, $ship->{enemy}));
+            $msn .= pack("v", $ship->{mission} == 6 ? $ship->{mission1target} : 0);
+            $dat .= $msn;
+            $dis .= $msn;
+
+            # Damage, Crew, Clans, Name
+            $dat .= rstPackFields($ship, "v3A20", qw(damage crew clans name));
+            $dis .= rstPackFields($ship, "v3A20", qw(damage crew clans name));
+
+            # Minerals
+            foreach (qw(neutronium tritanium duranium molybdenum supplies)) {
+                my $new = $ship->{$_};
+                my $old = unpAdjustUse($new, $pAdjust, $adjkey, $_."Used");
+                $dat .= pack("v", $new);
+                $dis .= pack("v", $old);
+            }
+
+            # Transfers
+            # FIXME: jettison?
+            if ($ship->{transfertargettype} == 1) {
+                # Unload
+                $dat .= rstPackFields($ship,
+                                      "v7",
+                                      qw(transferneutronium transfertritanium
+                                         transferduranium transfermolybdenum
+                                         transferclans transfersupplies
+                                         transfertargetid));
+            } else {
+                $dat .= "\0" x 14;
+            }
+            $dis .= "\0" x 14;
+            if ($ship->{transfertargettype} == 2) {
+                # Transfer
+                $dat .= rstPackFields($ship,
+                                      "v7",
+                                      qw(transferneutronium transfertritanium
+                                         transferduranium transfermolybdenum
+                                         transferclans transfersupplies
+                                         transfertargetid));
+            } else {
+                $dat .= "\0" x 14;
+            }
+            $dis .= "\0" x 14;
+
+            if ($ship->{transfermegacredits} || $ship->{transferammo}) {
+                print "WARNING: transfer of mc and/or ammo not implemented yet\n";
+            }
+
+            # Remainder of mission
+            $msn = pack("v", $ship->{mission} == 7 ? $ship->{mission1target} : 0);
+            $dat .= $msn;
+            $dis .= $msn;
+
+            # Cash
+            my $newMC = $ship->{megacredits};
+            my $oldMC = unpAdjustUse($newMC, $pAdjust, $adjkey, "cashUsed");
+            $oldMC = unpAdjustConsume($oldMC, $pAdjust, $adjkey, "cashMade");
+
+            $dat .= pack("v", $newMC);
+            $dis .= pack("v", $oldMC);
+
+            # Remember
+            push @dat, $dat;
+            push @dis, $dis;
+
+            if ($ship->{id} <= 500) {
+                $pControl->[$ship->{id} - 1] = rstChecksum($dat);
+            } else {
+                $pControl->[$ship->{id} - 3499] = rstChecksum($dat);
+            }
+        }
+    }
+
+    (pack("v", scalar(@dat)) . join('', @dat),
+     pack("v", scalar(@dis)) . join('', @dis));
+}
 
 ######################################################################
 #
@@ -744,6 +1365,26 @@ sub utilMakeScore {
 #  RST creation
 #
 ######################################################################
+
+sub rstMakeTimeStamp {
+    my $parsedReply = shift;
+
+    # Find timestamp. It has the format
+    #  8/12/2011 9:00:13 PM
+    #  8/7/2011 1:33:42 PM
+    my @time = split m|[/: ]+|, $parsedReply->{rst}{settings}{hoststart};
+    if (@time != 7) {
+        print "WARNING: unable to figure out a reliable timestamp\n";
+        while (@time < 7) {
+            push @time, 0;
+        }
+    } else {
+        # Convert to international time format
+        if ($time[3] == 12) { $time[3] = 0 }
+        if ($time[4] eq 'PM') { $time[3] += 12 }
+    }
+    return substr(sprintf("%02d-%02d-%04d%02d:%02d:%02d", @time), 0, 18);
+}
 
 sub rstWriteHeader {
     my @offsets = @_;
@@ -1387,6 +2028,23 @@ sub stateCookies {
     join("; ", @cookie);
 }
 
+# Check a received reply for consistency, and remember necessary
+# items in state file.
+sub stateCheckReply {
+    my $parsedReply = shift;
+    if (!exists $parsedReply->{rst}) {
+        die "ERROR: no result file received\n";
+    }
+    if (!$parsedReply->{rst}{player}{raceid}) {
+        die "ERROR: result does not contain player name\n";
+    }
+    if ($parsedReply->{rst}{player}{savekey} ne $parsedReply->{savekey}) {
+        die "ERROR: received two different savekeys\n"
+    }
+    stateSet('savekey', $parsedReply->{savekey});
+    stateSet('player', $parsedReply->{rst}{player}{raceid});
+}
+
 sub doStatus {
     foreach (sort keys %stateValues) {
         my $v = stateQuote($stateValues{$_});
@@ -1784,6 +2442,20 @@ sub sequence {
         --$b;
     }
     @result;
+}
+
+# Array search: given an array, returns the element which has {$key} = $value
+sub asearch {
+    my $pArray = shift;
+    my $key = shift;
+    my $value = shift;
+    my $default = shift;
+    foreach (@$pArray) {
+        if ($_->{$key} == $value) {
+            return $_
+        }
+    }
+    return $default;
 }
 
 sub utf8ToLatin1 {
