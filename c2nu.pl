@@ -36,6 +36,9 @@
 #    unpack [GAME]  Download Nu RST and create DAT/DIS files. This has the
 #                   advantage of leaving undo information for building.
 #endif
+#if CMD_MAKETURN
+#    maketurn       Create turn commands and upload.
+#endif
 #if CMD_DUMP
 #    dump [GAME]    Download Nu RST and dump beautified JSON.
 #endif
@@ -113,6 +116,11 @@ if ($cmd eq 'help') {
     doDownloadResult() unless $1 eq '2';
     doUnpack()         unless $1 eq '1';
 #endif
+#if CMD_MAKETURN
+} elsif ($cmd =~ /^maketurn([12]?)$/) {
+    doMakeTurn()       unless $1 eq '2';
+    #doUploadTurn()     unless $1 eq '1';
+#endif
 #if CMD_DUMP
 } elsif ($cmd =~ /^dump([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
@@ -149,6 +157,12 @@ sub doHelp {
 #if CMD_RST
     print "  rst [GAME]        download Nu RST and convert to VGAP RST\n";
 #endif
+#if CMD_UNPACK
+    print "  unpack [GAME]     download Nu RST and create unpacked data\n";
+#endif
+#if CMD_MAKETURN
+    print "  maketurn          create turn file and upload\n";
+#endif
 #if CMD_DUMP
     print "  dump [GAME]       download Nu RST and dump JSON\n";
 #endif
@@ -158,6 +172,9 @@ sub doHelp {
     print "\n";
     print "Download commands can be split into the download part ('vcr1') and the\n";
     print "convert part ('vcr2').\n";
+#if CMD_MAKETURN
+    print "Likewise, 'maketurn1' just generates the turn, 'maketurn2' uploads it.\n";
+#endif
 }
 
 #autosplit
@@ -277,15 +294,7 @@ sub doList {
 
 sub doWriteVcr {
     # Read state
-    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
-    my $body;
-    while (1) {
-        my $tmp;
-        if (!read(IN, $tmp, 4096)) { last }
-        $body .= $tmp;
-    }
-    close IN;
-
+    my $body = readFile("c2rst.txt");
     print "Parsing result...\n";
     doVcr(jsonParse($body));
 }
@@ -362,15 +371,7 @@ sub doDownloadResult {
 
 sub doWriteResult {
     # Read state
-    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
-    my $body;
-    while (1) {
-        my $tmp;
-        if (!read(IN, $tmp, 4096)) { last }
-        $body .= $tmp;
-    }
-    close IN;
-
+    my $body = readFile("c2rst.txt");
     print "Parsing result...\n";
     doResult(jsonParse($body));
 }
@@ -674,14 +675,7 @@ sub makeUtilData {
 
 sub doUnpack {
     # Read state
-    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
-    my $body;
-    while (1) {
-        my $tmp;
-        if (!read(IN, $tmp, 4096)) { last }
-        $body .= $tmp;
-    }
-    close IN;
+    my $body = readFile("c2rst.txt");
     print "Parsing result...\n";
     my $parsedReply = jsonParse($body);
     stateCheckReply($parsedReply);
@@ -735,7 +729,7 @@ sub doUnpack {
     unpWriteMessages("mdata$race.dat", @msgs);
 
     # FIXME: save outgoing messages
-    unpWriteMessages("mess$race.dat", "\0\0");
+    unpWriteFile("mess$race.dat", "\0\0");
 
     # GEN
     unpWriteFile("gen$race.dat", unpPackGen($parsedReply, $player,
@@ -857,101 +851,6 @@ sub unpUpdateIndex {
     unpWriteFile("init.tmp", pack("v*", @index));
 }
 
-# Find a stock
-sub unpFindStock {
-    my $baseId = shift;
-    my $parsedReply = shift;
-    my $stockType = shift;
-    my $stockId = shift;
-    my $pStocks = $parsedReply->{rst}{stock};
-    foreach (@$pStocks) {
-        if ($_->{starbaseid} == $baseId && $_->{stocktype} == $stockType && $_->{stockid} == $stockId) {
-            return $_;
-        }
-    }
-    return {"amount"=>0, "builtamount"=>0};
-}
-
-sub unpAddCost {
-    my $pAdjust = shift;
-    my $adjkey = shift;
-    my $built = shift;
-    my $item = shift;
-    my $costKey = shift;
-    $pAdjust->{$adjkey}{cashUsed} += $built * $item->{$costKey};
-    $pAdjust->{$adjkey}{tritaniumUsed} += $built * $item->{tritanium};
-    $pAdjust->{$adjkey}{duraniumUsed} += $built * $item->{duranium};
-    $pAdjust->{$adjkey}{molybdenumUsed} += $built * $item->{molybdenum};
-}
-
-sub unpAdjustProduce {
-    my $pOld = shift;
-    my $pAdjust = shift;
-    my $adjkey = shift;
-    my $item = shift;
-    if ($$pOld < 0) {
-        # Remember that we built something but cannot store that flow
-        $pAdjust->{$adjkey}{$item} -= $$pOld;
-        $$pOld = 0;
-    }
-}
-
-sub unpAdjustConsume {
-    my $new = shift;
-    my $pAdjust = shift;
-    my $adjkey = shift;
-    my $item = shift;
-    if (exists($pAdjust->{$adjkey}{$item})) {
-        my $old = $new - $pAdjust->{$adjkey}{$item};
-        if ($old < 0) {
-            $pAdjust->{$adjkey}{$item} = -$old;
-            return 0;
-        } else {
-            $pAdjust->{$adjkey}{$item} = 0;
-            return $old;
-        }
-    } else {
-        return $new;
-    }
-}
-
-sub unpAdjustUse {
-    my $new = shift;
-    my $pAdjust = shift;
-    my $adjkey = shift;
-    my $item = shift;
-    if (exists($pAdjust->{$adjkey}{$item})) {
-        $new += $pAdjust->{$adjkey}{$item};
-        $pAdjust->{$adjkey}{$item} = 0;
-    }
-    return $new;
-}
-
-sub unpLogFailedFlows {
-    my $pAdjust = shift;
-    my @log;
-    foreach my $xy (sort keys %$pAdjust) {
-        my $item = "Location $xy:\n";
-        my $did = 0;
-        foreach (sort keys %{$pAdjust->{$xy}}) {
-            if ($pAdjust->{$xy}{$_}) {
-                $item .= "  $_ = $pAdjust->{$xy}{$_}\n";
-                $did = 1;
-            }
-        }
-        push @log, "$item\n" if $did;
-    }
-
-    if (@log) {
-        printf "WARNING: %d flows not resolved, see c2flow.txt.\n", scalar(@log);
-        open LOG, "> c2flow.txt" or die "c2flow.txt: $!\n";
-        print LOG @log;
-        close LOG;
-    } else {
-        unlink "c2flow.txt";
-    }
-}
-
 sub unpPackBases {
     my ($parsedReply, $player, $pControl, $pAdjust) = @_;
 
@@ -1034,7 +933,7 @@ sub unpPackBases {
 
         # Torps
         foreach (1 .. 10) {
-            my $stock = unpFindStock($base->{id}, $parsedReply, 4, $_);
+            my $stock = unpFindStock($base->{id}, $parsedReply, 5, $_);
             my $tube = asearch($parsedReply->{rst}{torpedos}, "id", $_);
             my $new = $stock->{amount};
             my $old = $stock->{amount} - $stock->{builtamount};
@@ -1123,6 +1022,14 @@ sub unpPackPlanets {
             my $dis = $dat;
 
             if ($planet->{ownerid} == $player) {
+                # Track base building
+                if ($planet->{buildingstarbase}) {
+                    $pAdjust->{$adjkey}{cashUsed} += 900;
+                    $pAdjust->{$adjkey}{tritaniumUsed} += 402;
+                    $pAdjust->{$adjkey}{duraniumUsed} += 120;
+                    $pAdjust->{$adjkey}{molybdenumUsed} += 340;
+                }
+
                 # Structures
                 foreach (0 .. 2) {
                     my $built = $planet->{"built".$fields[$_]};
@@ -1232,7 +1139,7 @@ sub unpPackShips {
             $dat .= pack("v", $newAmmo);
             $dis .= pack("v", $oldAmmo);
 
-            # Torp type
+            # Torp launcher count
             $dat .= pack("v", $ship->{torps});
             $dis .= pack("v", $ship->{torps});
 
@@ -1312,13 +1219,108 @@ sub unpPackShips {
             if ($ship->{id} <= 500) {
                 $pControl->[$ship->{id} - 1] = rstChecksum($dat);
             } else {
-                $pControl->[$ship->{id} - 3499] = rstChecksum($dat);
+                $pControl->[$ship->{id} + 1499] = rstChecksum($dat);
             }
         }
     }
 
     (pack("v", scalar(@dat)) . join('', @dat),
      pack("v", scalar(@dis)) . join('', @dis));
+}
+
+# Find a stock
+sub unpFindStock {
+    my $baseId = shift;
+    my $parsedReply = shift;
+    my $stockType = shift;
+    my $stockId = shift;
+    my $pStocks = $parsedReply->{rst}{stock};
+    foreach (@$pStocks) {
+        if ($_->{starbaseid} == $baseId && $_->{stocktype} == $stockType && $_->{stockid} == $stockId) {
+            return $_;
+        }
+    }
+    return {"amount"=>0, "builtamount"=>0};
+}
+
+sub unpAddCost {
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $built = shift;
+    my $item = shift;
+    my $costKey = shift;
+    $pAdjust->{$adjkey}{cashUsed} += $built * $item->{$costKey};
+    $pAdjust->{$adjkey}{tritaniumUsed} += $built * $item->{tritanium};
+    $pAdjust->{$adjkey}{duraniumUsed} += $built * $item->{duranium};
+    $pAdjust->{$adjkey}{molybdenumUsed} += $built * $item->{molybdenum};
+}
+
+sub unpAdjustProduce {
+    my $pOld = shift;
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $item = shift;
+    if ($$pOld < 0) {
+        # Remember that we built something but cannot store that flow
+        $pAdjust->{$adjkey}{$item} -= $$pOld;
+        $$pOld = 0;
+    }
+}
+
+sub unpAdjustConsume {
+    my $new = shift;
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $item = shift;
+    if (exists($pAdjust->{$adjkey}{$item})) {
+        my $old = $new - $pAdjust->{$adjkey}{$item};
+        if ($old < 0) {
+            $pAdjust->{$adjkey}{$item} = -$old;
+            return 0;
+        } else {
+            $pAdjust->{$adjkey}{$item} = 0;
+            return $old;
+        }
+    } else {
+        return $new;
+    }
+}
+
+sub unpAdjustUse {
+    my $new = shift;
+    my $pAdjust = shift;
+    my $adjkey = shift;
+    my $item = shift;
+    if (exists($pAdjust->{$adjkey}{$item})) {
+        $new += $pAdjust->{$adjkey}{$item};
+        $pAdjust->{$adjkey}{$item} = 0;
+    }
+    return $new;
+}
+
+sub unpLogFailedFlows {
+    my $pAdjust = shift;
+    my @log;
+    foreach my $xy (sort keys %$pAdjust) {
+        my $item = "Location $xy:\n";
+        my $did = 0;
+        foreach (sort keys %{$pAdjust->{$xy}}) {
+            if ($pAdjust->{$xy}{$_}) {
+                $item .= "  $_ = $pAdjust->{$xy}{$_}\n";
+                $did = 1;
+            }
+        }
+        push @log, "$item\n" if $did;
+    }
+
+    if (@log) {
+        printf "WARNING: %d flows not resolved, see c2flow.txt.\n", scalar(@log);
+        open LOG, "> c2flow.txt" or die "c2flow.txt: $!\n";
+        print LOG @log;
+        close LOG;
+    } else {
+        unlink "c2flow.txt";
+    }
 }
 
 ######################################################################
@@ -1329,14 +1331,7 @@ sub unpPackShips {
 
 sub doDump {
     # Read state
-    open IN, "< c2rst.txt" or die "c2rst.txt: $!\n";
-    my $body;
-    while (1) {
-        my $tmp;
-        if (!read(IN, $tmp, 4096)) { last }
-        $body .= $tmp;
-    }
-    close IN;
+    my $body = readFile("c2rst.txt");
     jsonDump(jsonParse($body), "");
 }
 
@@ -1903,6 +1898,324 @@ sub rstMapOwnerToRace {
 
 ######################################################################
 #
+#  Maketurn
+#
+######################################################################
+
+sub doMakeTurn {
+    # Load old state
+    print "Reading result...\n";
+    my $parsedReply = jsonParse(readFile("c2rst.txt"));
+    stateCheckReply($parsedReply);
+    my $player = $parsedReply->{rst}{player}{id};
+    my $race = rstMapOwnerToRace($parsedReply, $player);
+
+    # Load data
+    my $pShips = mktLoadShips($race);
+    my $pPlanets = mktLoadPlanets($race);
+    my $pBases = mktLoadBases($race);
+
+    # Complete data
+    mktCompletePlanets($parsedReply, $pPlanets);
+    mktCompleteFlows($parsedReply, $pShips, $pPlanets, $pBases);
+
+    # Nu client uploads:
+    # - changed planets
+    # - changed ships
+    # - changed bases
+    # - all stocks if any stock changed
+    # - all relations if any relation changed
+    # - changed notes
+    # To ensure that we always have consistent data at the host, it
+    # makes sense to group items.
+    # - all bases, planets, stocks, and ships orbiting
+    # - planets, ships orbiting
+    # - remaining ship groups
+
+    # Ah, crap, just serialize everything into one big blob
+    my @turn;
+    foreach (@$pPlanets) {
+        push @turn, mktPackPlanet($parsedReply, $_);
+    }
+    foreach (@$pShips) {
+        push @turn, mktPackShips($parsedReply, $_);
+    }
+    #...
+
+    # Save turn
+    print "Making c2trn.txt (", scalar(@turn), " objects)...\n";
+    open TRN, "> c2trn.txt" or die "c2trn.txt: $!\n";
+    foreach (@turn) {
+        print TRN "$_\n";
+    }
+    close TRN;
+}
+
+
+sub mktPackPlanet {
+    my $parsedReply = shift;
+    my $p = shift;
+    my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $p->{id});
+
+    mktPack("Planet".$p->{id},
+            Id => $p->{id},
+            FriendlyCode => $p->{fcode},
+            Mines => $p->{mines},
+            Factories => $p->{factories},
+            Defense => $p->{defense},
+            TargetMines => $origPlanet->{targetmines},
+            TargetFactories => $origPlanet->{targetfactories},
+            TargetDefense => $origPlanet->{targetdefense},
+            BuiltMines => $p->{mines} - $origPlanet->{mines} + $origPlanet->{builtmines},
+            BuiltFactories => $p->{factories} - $origPlanet->{factories} + $origPlanet->{builtfactories},
+            BuiltDefense => $p->{defense} - $origPlanet->{defense} + $origPlanet->{builtdefense},
+            MegaCredits => $p->{money},
+            Supplies => $p->{supplies},
+            SuppliesSold => $p->{suppliesSold},
+            Neutronium => $p->{neutronium},
+            Molybdenum => $p->{molybdenum},
+            Duranium => $p->{duranium},
+            Tritanium => $p->{tritanium},
+            Clans => $p->{clans},
+            ColonistTaxRate => $p->{colonisttaxrate},
+            NativeTaxRate => $p->{nativetaxrate},
+            BuildingStarbase => $p->{buildbase},
+            NativeHappyChange => $origPlanet->{nativehappychange},  # let's hope the host calculates this anew.
+            ColHappyChange => $origPlanet->{colhappychange},
+            ColChange => $origPlanet->{colchange},
+            ReadyStatus => $origPlanet->{readystatus});
+}
+
+sub mktPackShips {
+    my $parsedReply = shift;
+    my $s = shift;
+    my $origShip = asearch($parsedReply->{rst}{ships}, 'id', $s->{id});
+
+    # Name: Nu allows names >20 chars, so try to keep the original name
+    my $name;
+    if (substr($s->{name} . (' 'x20), 0, 20) eq substr($origShip->{name}, 0, 20)) {
+        $name = $origShip->{name};
+    } else {
+        $name = $s->{name};
+    }
+
+    mktPack("Ship".$s->{id},
+            Id => $s->{id},
+            Name => $name,
+            Neutronium => $s->{neutronium},
+            Duranium => $s->{duranium},
+            Tritanium => $s->{tritanium},
+            Molybdenum => $s->{molybdenum},
+            MegaCredits => $s->{money},
+            Supplies => $s->{supplies},
+            Clans => $s->{clans},
+            Ammo => $s->{ammo},
+#        data.add("TransferNeutronium", ship.transferneutronium);
+#        data.add("TransferDuranium", ship.transferduranium);
+#        data.add("TransferTritanium", ship.transfertritanium);
+#        data.add("TransferMolybdenum", ship.transfermolybdenum);
+#        data.add("TransferMegaCredits", ship.transfermegacredits);
+#        data.add("TransferSupplies", ship.transfersupplies);
+#        data.add("TransferClans", ship.transferclans);
+#        data.add("TransferAmmo", ship.transferammo);
+#        data.add("TransferTargetId", ship.transfertargetid);
+#        data.add("TransferTargetType", ship.transfertargettype);
+            TargetX => signedShort($s->{dx}),
+            TargetY => signedShort($s->{dy}),
+            FriendlyCode => $s->{fcode},
+            Warp => $s->{warp},
+#        data.add("Mission", ship.mission);
+#        data.add("Mission1Target", ship.mission1target);
+#        data.add("Mission2Target", ship.mission2target);
+            Enemy => $s->{enemy},
+            ReadyStatus => $origShip->{readystatus}
+           );
+}
+
+
+# Complete flows: create suppliesSold (planet), torpXBuilt, fightersBuilt (base)
+sub mktCompleteFlows {
+    my $parsedReply = shift;
+    my $pShips = shift;
+    my $pPlanets = shift;
+    my $pBases = shift;
+
+    foreach my $p (@$pPlanets) {
+        # Planet: supplies
+        my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $p->{id});
+        $p->{suppliesSold} = $origPlanet->{supplies} - $p->{supplies} + $origPlanet->{suppliessold};
+
+        # Ship supplies
+        foreach my $s (@$pShips) {
+            if ($s->{x} == $p->{x} && $s->{y} == $p->{y}) {
+                my $origShip = asearch($parsedReply->{rst}{ships}, 'id', $s->{id});
+                $p->{suppliesSold} += $origShip->{supplies} - $s->{supplies};
+            }
+        }
+
+        # Base and orbits: ammo
+        my $b = asearch($pBases, 'id', $p->{id});
+        if (defined($b)) {
+            my $origBase = asearch($parsedReply->{rst}{starbases}, 'planetid', $p->{id});
+
+            # Fighters
+            $b->{fightersBuilt} = $b->{fighters} - $origBase->{fighters} + $origBase->{builtfighters};
+
+            # Torps
+            foreach (1 .. 10) {
+                my $stock = unpFindStock($origBase->{id}, $parsedReply, 5, $_);
+                $b->{"torp$_"."Built"} = $b->{"torp$_"} - $stock->{amount} + $stock->{builtamount};
+            }
+
+            # Ships
+            foreach my $s (@$pShips) {
+                if ($s->{x} == $p->{x} && $s->{y} == $p->{y}) {
+                    my $origShip = asearch($parsedReply->{rst}{ships}, 'id', $s->{id});
+                    if ($origShip->{bays} > 0) {
+                        $b->{fightersBuilt} += $s->{ammo} - $origShip->{ammo};
+                    } elsif ($origShip->{torps} > 0) {
+                        $b->{"torp".$origShip->{torpedoid}."Built"} += $s->{ammo} - $origShip->{ammo};
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Complete planets: fill in x,y data
+sub mktCompletePlanets {
+    my $parsedReply = shift;
+    my $pPlanets = shift;
+    foreach (@$pPlanets) {
+        my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $_->{id});
+        $_->{x} = $origPlanet->{x};
+        $_->{y} = $origPlanet->{y};
+    }
+}
+
+sub mktLoadShips {
+    my $race = shift;
+    return mktLoadFile("ship$race.dat", $race, 107,
+                       "v2A3v19A20v21",
+                       qw(id player fcode warp dx dy x y engine hull beam nbeams nbays torp ammo ntubes mission enemy towid
+                          damage crew clans name neutronium tritanium duranium molybdenum supplies
+                          unloadneutronium unloadtritanium unloadduranium unloadmolybdenum unloadclans unloadsupplies unloadid
+                          transferneutronium transfertritanium transferduranium transfermolybdenum transferclans transfersupplies transferid
+                          intid money));
+}
+
+sub mktLoadPlanets {
+    my $race = shift;
+    return mktLoadFile("pdata$race.dat", $race, 85,
+                       "v2A3v3V11v9Vv3",
+                       qw(player id fcode mines factories defense
+                          neutronium tritanium duranium molybdenum
+                          clans supplies money
+                          groundneutronium groundtritanium groundduranium groundmolybdenum
+                          densityneutronium densitytritanium densityduranium densitymolybdenum
+                          colonisttaxrate nativetaxrate colonisthappypoints nativehappypoints
+                          nativegovernment
+                          nativeclans
+                          nativeracename temperature buildbase));
+}
+
+sub mktLoadBases {
+    my $race = shift;
+    return mktLoadFile("bdata$race.dat", $race, 156,
+                       "v78",
+                       qw(id player defense damage
+                          enginetechlevel hulltechlevel beamtechlevel torptechlevel
+                          engine1 engine2 engine3 engine4 engine5 engine6 engine7 engine8 engine9
+                          hull1 hull2 hull3 hull4 hull5 hull6 hull7 hull8 hull9 hull10
+                          hull11 hull12 hull13 hull14 hull15 hull16 hull17 hull18 hull19 hull20
+                          beam1 beam2 beam3 beam4 beam5 beam6 beam7 beam8 beam9 beam10
+                          tube1 tube2 tube3 tube4 tube5 tube6 tube7 tube8 tube9 tube10
+                          torp1 torp2 torp3 torp4 torp5 torp6 torp7 torp8 torp9 torp10
+                          fighters
+                          yardshipid
+                          yardshipaction
+                          mission
+                          buildshiptype
+                          buildengineid
+                          buildbeamid buildbeamcount
+                          buildtorpedoid buildtorpcount
+                          zero));
+}
+
+# Load a file
+sub mktLoadFile {
+    my $f = shift;
+    my $race = shift;
+    my $size = shift;
+    my $pattern = shift;
+    my @result;
+
+    # Open file, read count
+    open FILE, "< $f" or die "$f: $!\n";
+    binmode FILE;
+    my $h;
+    my $skip = 0;
+    if (read(FILE, $h, 2) != 2) { die "$f: read error\n" }
+    $h = unpack("v", $h);
+    for (my $i = 0; $i < $h; ++$i) {
+        # Read one item
+        my $item;
+        if (read(FILE, $item, $size) != $size) { die "$f: read error\n" }
+
+        # Parse item into hash
+        my @item = unpack($pattern, $item);
+        my $thisResult = {};
+        foreach (@_) {
+            if (!@item) { die }
+            $thisResult->{$_} = shift(@item);
+        }
+        if (@item) { die }
+
+        # Remember item only if it belongs to our race
+        if ($thisResult->{player} == $race) {
+            push @result, $thisResult
+        } else {
+            ++$skip;
+        }
+    }
+
+    # Validate
+    my $j;
+    my $i = read(FILE, $j, 11);
+    if ($i != 0 && $i != 10) { die "$f: invalid file size\n"; }
+
+    close FILE;
+    print "Loaded $f ($h entries, $skip skipped).\n";
+    return \@result;
+}
+
+# Pack data
+sub mktPack {
+    my $name = shift;
+    my $result = "$name=";
+    my $first = 1;
+    while (@_) {
+        my $key = shift;
+        my $value = shift;
+        if (!defined($value)) {
+            print "WARNING: internal error, $name/$key is undefined\n";
+            last
+        }
+        if ($value =~ s:[|&]:_:g) {
+            print "WARNING: '|' or '&' are not allowed with fragile web apps, replaced with '_' on $name/$key\n";
+        }
+        $result .= "|||" unless $first;
+        $result .= $key;
+        $result .= ":::";
+        $result .= latin1ToUtf8($value);
+        $first = 0;
+    }
+    $result;
+}
+
+
+######################################################################
+#
 #  State file
 #
 ######################################################################
@@ -2463,5 +2776,32 @@ sub utf8ToLatin1 {
     my $s = shift;
     $s =~ s/([\xC0-\xC3])([\x80-\xBF])/chr(((ord($1) & 3) << 6) + (ord($2) & 63))/eg;
     $s;
+}
+
+sub latin1ToUtf8 {
+    my $s = shift;
+    $s =~ s/([\x80-\xFF])/chr(0xC0 + (ord($1) >> 6)) . chr(0x80 + (ord($1) & 63))/eg;
+    $s;
+}
+
+sub signedShort {
+    my $v = shift;
+    if ($v >= 32768) {
+        $v -= 65536
+    }
+    $v;
+}
+
+sub readFile {
+    my $f = shift;
+    open IN, "< $f" or die "$f: $!\n";
+    my $body;
+    while (1) {
+        my $tmp;
+        if (!read(IN, $tmp, 4096)) { last }
+        $body .= $tmp;
+    }
+    close IN;
+    $body;
 }
 #end
