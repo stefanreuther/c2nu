@@ -44,10 +44,13 @@ Differences between Nu data model and VGA Planets
     planet Id; the planet Id is an attribute of the base.
   - The ship to build is identified by a hull number, not a truehull
     slot.
+  - A ship build is triggered by the "isbuilding" property. A base
+    can store a ship assembly with isbuilding=false (a ship in BDATA
+    will always be built).
   - Base storage is organized as "stock" (another top-level object).
     Each stock is a tuple of (starbaseid, stocktype, stockid, amount,
     builtamount, id), with
-    . starbaesid being the base (not planet!) Id
+    . starbaseid being the base (not planet!) Id
     . stocktype is 1 for hulls, 2 for engines, 3 for beams, 4 for
       launchers, and 5 for torpedoes
     . stockid is the item Id (hullspec/engspec/beamspec/torpspec
@@ -69,7 +72,7 @@ Differences between Nu data model and VGA Planets
   target being a planet Id, and for gather missions, with target being
   a ship Id.
 
-  All friendly codes are lower-case.
+  All special friendly codes are lower-case/case-insensitive.
 
   Nu tracks undoable actions by counting supplies sold, torpedoes
   built, etc. However, there is no ability to find out the real

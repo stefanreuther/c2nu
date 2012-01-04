@@ -50,6 +50,13 @@
 #  to perform the download, and "vcr2" to convert the download without
 #  accessing the network.
 #
+#if CMD_MAKETURN
+#  Likewise, "maketurn" can be split into "maketurn1" (to prepare the
+#  data) and "maketurn2" to upload it. Since "maketurn2" modifies server
+#  data, it would be wise to always download new data from the server
+#  after uploading.
+#
+#endif
 #  Instructions:
 #  - make a directory and go there using the command prompt
 #  - log in using 'c2nu --host=planets.nu login USER PASS'
@@ -62,7 +69,7 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011 Stefan Reuther
+#  (c) 2011-2012 Stefan Reuther
 #
 use strict;
 use Socket;
@@ -1932,15 +1939,18 @@ sub doMakeTurn {
     # - planets, ships orbiting
     # - remaining ship groups
 
-    # Ah, crap, just serialize everything into one big blob
+    # Ah, crap, just serialize everything into one big blob for now.
     my @turn;
     foreach (@$pPlanets) {
         push @turn, mktPackPlanet($parsedReply, $_);
     }
     foreach (@$pShips) {
-        push @turn, mktPackShips($parsedReply, $_);
+        push @turn, mktPackShip($parsedReply, $_);
     }
-    #...
+    foreach (@$pBases) {
+        push @turn, mktPackBase($parsedReply, $_);
+    }
+    push @turn, mktPackStocks($parsedReply, $pBases);
 
     # Save turn
     print "Making c2trn.txt (", scalar(@turn), " objects)...\n";
@@ -1951,6 +1961,179 @@ sub doMakeTurn {
     close TRN;
 }
 
+
+sub mktPackStocks {
+    my $parsedReply = shift;
+    my $b = shift;
+    my $th = $parsedReply->{rst}{racehulls};
+
+    # Copy stocks
+    my @stocks;
+    my $lastStockId = 100;
+    foreach (@{$parsedReply->{rst}{stock}}) {
+        push @stocks, { amount => $_->{amount},
+                        builtamount => $_->{builtamount},
+                        id => $_->{id},
+                        starbaseid => $_->{starbaseid},
+                        stockid => $_->{stockid},
+                        stocktype => $_->{stocktype} };
+        if ($_->{id} >= $lastStockId) {
+            $lastStockId = $_->{id};
+        }
+    }
+    my $saveLastStockId = $lastStockId;
+
+    # Populate and update stocks
+    foreach my $bb (@$b) {
+        my $origBase = asearch($parsedReply->{rst}{starbases}, 'planetid', $bb->{id});
+
+        # Hulls
+        foreach my $slot (1 .. @$th) {
+            mktUpdateStock($origBase->{id}, 1, $th->[$slot - 1], \@stocks, \$lastStockId, $bb->{"hull$slot"});
+        }
+
+        # Engines
+        foreach my $slot (1 .. 9) {
+            mktUpdateStock($origBase->{id}, 2, $slot, \@stocks, \$lastStockId, $bb->{"engine$slot"});
+        }
+
+        # Beams
+        foreach my $slot (1 .. 10) {
+            mktUpdateStock($origBase->{id}, 3, $slot, \@stocks, \$lastStockId, $bb->{"beam$slot"});
+        }
+
+        # Torpedo Launchers
+        foreach my $slot (1 .. 10) {
+            mktUpdateStock($origBase->{id}, 4, $slot, \@stocks, \$lastStockId, $bb->{"tube$slot"});
+        }
+
+        # Torpedoes. Since these can be moved, the "built" values have been precomputed
+        # in the "flows" step. So we just update the stocks.
+        foreach my $slot (1 .. 10) {
+            my $stock = mktFindStock($origBase->{id}, 5, $slot, \@stocks);
+            if (defined($stock)) {
+                $stock->{amount} = $bb->{"torp$slot"};
+                $stock->{builtamount} = $bb->{"torp$slot"."Built"};
+            } else {
+                if ($bb->{"torp$slot"."Built"}) {
+                    push @stocks, { amount => $bb->{"torp$slot"},
+                                    starbaseid => $origBase->{id},
+                                    builtamount => $bb->{"torp$slot"."Built"},
+                                    id => ++$lastStockId,
+                                    stockid => $slot,
+                                    stocktype => 5 };
+                }
+            }
+        }
+    }
+
+    if ($lastStockId != $saveLastStockId) {
+        print "Created ", $lastStockId - $saveLastStockId, " stocks.\n";
+        print "++ You should fetch your RST anew after uploading this turn. ++\n";
+    }
+
+    # Serialize them
+    my @result;
+    foreach (@stocks) {
+        push @result, mktPack("Stock".$_->{id},
+                              Id => $_->{id},
+                              StarbaseId => $_->{starbaseid},
+                              StockType => $_->{stocktype},
+                              StockId => $_->{stockid},
+                              Amount => $_->{amount},
+                              BuiltAmount => $_->{builtamount});
+    }
+    @result;
+}
+
+sub mktUpdateStock {
+    my $baseId = shift;
+    my $stockType = shift;
+    my $stockId = shift;
+    my $pStocks = shift;
+    my $pLastStockId = shift;
+    my $amount = shift;
+
+    my $stock = mktFindStock($baseId, $stockType, $stockId, $pStocks);
+    if (defined($stock)) {
+        # Update existing stock
+        $stock->{builtamount} += $amount - $stock->{amount};
+        $stock->{amount} = $amount;
+    } else {
+        # Make new stock
+        if ($amount) {
+            push @$pStocks, { amount => $amount,
+                              starbaseid => $baseId,
+                              builtamount => $amount,
+                              id => ++$$pLastStockId,
+                              stockid => $stockId,
+                              stocktype => 1 };
+        }
+    }
+}
+
+sub mktFindStock {
+    my $baseId = shift;
+    my $stockType = shift;
+    my $stockId = shift;
+    my $pStocks = shift;
+    foreach (@$pStocks) {
+        if ($_->{starbaseid} == $baseId && $_->{stocktype} == $stockType && $_->{stockid} == $stockId) {
+            return $_;
+        }
+    }
+    return undef;
+}
+
+sub mktPackBase {
+    my $parsedReply = shift;
+    my $b = shift;
+    my $origBase = asearch($parsedReply->{rst}{starbases}, 'planetid', $b->{id});
+
+    my @b;
+    if ($b->{buildshiptype}) {
+        my $th = $parsedReply->{rst}{racehulls};
+        if ($b->{buildshiptype} <= @$th) {
+            @b = (BuildHullId => $th->[$b->{buildshiptype} - 1],
+                  BuildEngineId => $b->{buildengineid},
+                  BuildBeamId => $b->{buildbeamid},
+                  BuildTorpedoId => $b->{buildtorpedoid},
+                  BuildBeamCount => $b->{buildbeamcount},
+                  BuildTorpCount => $b->{buildtorpcount},
+                  IsBuilding => 'false');
+        } else {
+            die "ERROR: starbase $b->{id}: Attempt to build an impossible ship\n";
+        }
+    } else {
+        @b = (BuildHullId => 0,
+              BuildEngineId => 0,
+              BuildBeamId => 0,
+              BuildTorpedoId => 0,
+              BuildBeamCount => 0,
+              BuildTorpCount => 0,
+              IsBuilding => 'false');
+    }
+
+    mktPack("Starbase".$b->{id},
+            Id => $b->{id},
+            Fighters => $b->{fighters},
+            Defense => $b->{defense},
+            BuiltFighters => $b->{fightersBuilt},
+            BuiltDefense => $b->{defense} - $origBase->{defense} + $origBase->{builtdefense},
+            HullTechLevel => $b->{hulltechlevel},
+            EngineTechLevel => $b->{enginetechlevel},
+            BeamTechLevel => $b->{beamtechlevel},
+            TorpTechLevel => $b->{torptechlevel},
+            HullTechUp => $b->{hulltechlevel} - $origBase->{hulltechlevel} + $origBase->{hulltechup},
+            EngineTechUp => $b->{enginetechlevel} - $origBase->{enginetechlevel} + $origBase->{enginetechup},
+            BeamTechUp => $b->{beamtechlevel} - $origBase->{beamtechlevel} + $origBase->{beamtechup},
+            TorpTechUp => $b->{torptechlevel} - $origBase->{torptechlevel} + $origBase->{torptechup},
+            Mission => $b->{mission},
+            ShipMission => $b->{yardshipaction},
+            TargetShipId => $b->{yardshipid},
+            @b,
+            ReadyStatus => $origBase->{readystatus});
+}
 
 sub mktPackPlanet {
     my $parsedReply = shift;
@@ -1979,14 +2162,14 @@ sub mktPackPlanet {
             Clans => $p->{clans},
             ColonistTaxRate => $p->{colonisttaxrate},
             NativeTaxRate => $p->{nativetaxrate},
-            BuildingStarbase => $p->{buildbase},
+            BuildingStarbase => ($p->{buildbase} ? "true" : "false"),
             NativeHappyChange => $origPlanet->{nativehappychange},  # let's hope the host calculates this anew.
             ColHappyChange => $origPlanet->{colhappychange},
             ColChange => $origPlanet->{colchange},
             ReadyStatus => $origPlanet->{readystatus});
 }
 
-sub mktPackShips {
+sub mktPackShip {
     my $parsedReply = shift;
     my $s = shift;
     my $origShip = asearch($parsedReply->{rst}{ships}, 'id', $s->{id});
@@ -1997,6 +2180,51 @@ sub mktPackShips {
         $name = $origShip->{name};
     } else {
         $name = $s->{name};
+    }
+
+    # Mission: undo remapping
+    my $m = $s->{mission} - 1;
+    my $t1 = $m==7 ? $s->{intid} : $m==6 ? $s->{towid} : 0;
+    my $t2 = 0;
+
+    # Transfer
+    my @x;
+    if (mktShipHasTransfer($s, 'unload')) {
+        if (mktShipHasTransfer($s, 'transfer')) {
+            print "WARNING: ship $s->{id} has unload and transfer order at the same time, transfer was ignored\n";
+        }
+        @x = (TransferNeutronium => $s->{unloadneutronium},
+              TransferDuranium => $s->{unloadduranium},
+              TransferTritanium => $s->{unloadtritanium},
+              TransferMolybdenum => $s->{unloadmolybdenum},
+              TransferMegaCredits => 0,
+              TransferSupplies => $s->{unloadsupplies},
+              TransferClans => $s->{unloadclans},
+              TransferAmmo => 0,
+              TransferTargetId => $s->{unloadid},
+              TransferTargetType => 1);
+    } elsif (mktShipHasTransfer($s, 'transfer')) {
+        @x = (TransferNeutronium => $s->{transferneutronium},
+              TransferDuranium => $s->{transferduranium},
+              TransferTritanium => $s->{transfertritanium},
+              TransferMolybdenum => $s->{transfermolybdenum},
+              TransferMegaCredits => 0,
+              TransferSupplies => $s->{transfersupplies},
+              TransferClans => $s->{transferclans},
+              TransferAmmo => 0,
+              TransferTargetId => $s->{transferid},
+              TransferTargetType => 2);
+    } else {
+        @x = (TransferNeutronium => 0,
+              TransferDuranium => 0,
+              TransferTritanium => 0,
+              TransferMolybdenum => 0,
+              TransferMegaCredits => 0,
+              TransferSupplies => 0,
+              TransferClans => 0,
+              TransferAmmo => 0,
+              TransferTargetId => 0,
+              TransferTargetType => 0);
     }
 
     mktPack("Ship".$s->{id},
@@ -2010,23 +2238,14 @@ sub mktPackShips {
             Supplies => $s->{supplies},
             Clans => $s->{clans},
             Ammo => $s->{ammo},
-#        data.add("TransferNeutronium", ship.transferneutronium);
-#        data.add("TransferDuranium", ship.transferduranium);
-#        data.add("TransferTritanium", ship.transfertritanium);
-#        data.add("TransferMolybdenum", ship.transfermolybdenum);
-#        data.add("TransferMegaCredits", ship.transfermegacredits);
-#        data.add("TransferSupplies", ship.transfersupplies);
-#        data.add("TransferClans", ship.transferclans);
-#        data.add("TransferAmmo", ship.transferammo);
-#        data.add("TransferTargetId", ship.transfertargetid);
-#        data.add("TransferTargetType", ship.transfertargettype);
-            TargetX => signedShort($s->{dx}),
-            TargetY => signedShort($s->{dy}),
+            @x,
+            TargetX => $s->{x} + $s->{dx},
+            TargetY => $s->{y} + $s->{dy},
             FriendlyCode => $s->{fcode},
             Warp => $s->{warp},
-#        data.add("Mission", ship.mission);
-#        data.add("Mission1Target", ship.mission1target);
-#        data.add("Mission2Target", ship.mission2target);
+            Mission => $m,
+            Mission1Target => $t1,
+            Mission2Target => $t2,
             Enemy => $s->{enemy},
             ReadyStatus => $origShip->{readystatus}
            );
@@ -2211,6 +2430,17 @@ sub mktPack {
         $first = 0;
     }
     $result;
+}
+
+sub mktShipHasTransfer {
+    my $s = shift;
+    my $what = shift;
+    return $s->{$what."neutronium"} > 0
+      || $s->{$what."tritanium"} > 0
+        || $s->{$what."duranium"} > 0
+          || $s->{$what."molybdenum"} > 0
+            || $s->{$what."clans"} > 0
+              || $s->{$what."supplies"} > 0;
 }
 
 
@@ -2782,14 +3012,6 @@ sub latin1ToUtf8 {
     my $s = shift;
     $s =~ s/([\x80-\xFF])/chr(0xC0 + (ord($1) >> 6)) . chr(0x80 + (ord($1) & 63))/eg;
     $s;
-}
-
-sub signedShort {
-    my $v = shift;
-    if ($v >= 32768) {
-        $v -= 65536
-    }
-    $v;
 }
 
 sub readFile {
