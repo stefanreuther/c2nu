@@ -45,6 +45,9 @@
 #if CMD_VCR
 #    vcr [GAME]     Download Nu RST and create VGAP VCRx.DAT for PlayVCR.
 #endif
+#if CMD_RUNHOST
+#    runhost        Run host for a solo game you previously downloaded
+#endif
 #
 #  All download commands can be split in two halves, i.e. "vcr1 [GAME]"
 #  to perform the download, and "vcr2" to convert the download without
@@ -126,7 +129,7 @@ if ($cmd eq 'help') {
 #if CMD_MAKETURN
 } elsif ($cmd =~ /^maketurn([12]?)$/) {
     doMakeTurn()       unless $1 eq '2';
-    #doUploadTurn()     unless $1 eq '1';
+    doUploadTurn()     unless $1 eq '1';
 #endif
 #if CMD_DUMP
 } elsif ($cmd =~ /^dump([12]?)$/) {
@@ -137,6 +140,10 @@ if ($cmd eq 'help') {
 } elsif ($cmd =~ /^vcr([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
     doWriteVcr()       unless $1 eq '1';
+#endif
+#if CMD_RUNHOST
+} elsif ($cmd eq 'runhost') {
+    doRunHost();
 #endif
 } else {
     die "Invalid command '$cmd'. '$0 --help' for help\n";
@@ -150,7 +157,7 @@ exit 0;
 #
 ######################################################################
 sub doHelp {
-    print "$0 - planets.nu interface - version $VERSION, (c) 2011 Stefan Reuther\n\n";
+    print "$0 - planets.nu interface - version $VERSION, (c) 2011-2012 Stefan Reuther\n\n";
     print "$0 [options] command [command args]\n\n";
     print "Options:\n";
     print "  --host=HOST       instead of 'planets.nu'\n";
@@ -175,6 +182,9 @@ sub doHelp {
 #endif
 #if CMD_VCR
     print "  vcr [GAME]        download Nu RST and create VGAP VCRx.DAT\n";
+#endif
+#if CMD_RUNHOST
+    print "  runhost           run host for solo game\n";
 #endif
     print "\n";
     print "Download commands can be split into the download part ('vcr1') and the\n";
@@ -446,7 +456,12 @@ sub makeSpecFile {
 
     # Load existing file or build empty file
     my @file;
-    if (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
+    if ($fileName eq 'xyplan.dat') {
+        # do NOT create xyplan.dat from original, it is expected to have holes!
+        foreach (1 .. $numEntries) {
+            push @file, [0,0,0];
+        }
+    } elsif (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
         binmode FILE;
         foreach (1 .. $numEntries) {
             my $buf;
@@ -1332,6 +1347,56 @@ sub unpLogFailedFlows {
 
 ######################################################################
 #
+#  Run Host
+#
+######################################################################
+
+sub doRunHost {
+    # Initialized?
+    if (stateGet('gameid') eq '') {
+        die "ERROR: please download a game first to initialize the directory.\n";
+    }
+
+    # Mark turn done
+    print "Marking turn done...\n";
+    my $reply = httpCall("POST /_ui/plugins?method=SetTurnReady&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+                         httpBuildQuery(gameId => stateGet('gameid'),
+                                        playerId => stateGet('playerid'),
+                                        ready => "true"));
+    rhCheckFailure(jsonParse($reply->{BODY}));
+
+    # Run host
+    print "Running host...\n";
+    $reply = httpCall("POST /_ui/plugins?method=HostGame&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+                      httpBuildQuery(gameId => stateGet('gameid')));
+    rhCheckFailure(jsonParse($reply->{BODY}));
+
+    # Wait 
+    print "Waiting for host to complete...\n";
+    while (1) {
+        sleep 5;
+        $reply = httpCall("POST /_ui/plugins?method=CheckHostDone&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+                          httpBuildQuery(gameId => stateGet('gameid')));
+        last if $reply->{BODY} ne '{}';
+    }
+    rhCheckFailure(jsonParse($reply->{BODY}));
+    print "++ Success ++\n";
+}
+
+sub rhCheckFailure {
+    my $reply = shift;
+    if (!(exists($reply->{success}) && $reply->{success} =~ /true/i)) {
+        print "++ Failure ++\n";
+        print "Server answer:\n";
+        foreach (sort keys %$reply) {
+            printf "%-20s %s\n", $_, $reply->{$_};
+        }
+        die "Aborted.\n";
+    }
+}
+
+######################################################################
+#
 #  Dumping
 #
 ######################################################################
@@ -1339,7 +1404,7 @@ sub unpLogFailedFlows {
 sub doDump {
     # Read state
     my $body = readFile("c2rst.txt");
-    jsonDump(jsonParse($body), "");
+    jsonDump(\*STDOUT, jsonParse($body), "");
 }
 
 ######################################################################
@@ -1952,13 +2017,60 @@ sub doMakeTurn {
     }
     push @turn, mktPackStocks($parsedReply, $pBases);
 
+    my $pTurn = [ { type=>"commands",
+                    data=>\@turn } ];
+
     # Save turn
-    print "Making c2trn.txt (", scalar(@turn), " objects)...\n";
+    print "Making c2trn.txt...\n";
     open TRN, "> c2trn.txt" or die "c2trn.txt: $!\n";
-    foreach (@turn) {
-        print TRN "$_\n";
-    }
+    jsonDump(\*TRN, $pTurn, "");
+    #foreach (@turn) {
+    #    print TRN "$_\n";
+    #}
     close TRN;
+}
+
+sub doUploadTurn {
+    # Load the turn file
+    print "Loading turn file...\n";
+    my $pTurn = jsonParse(readFile("c2trn.txt"));
+
+    # Process it
+    foreach my $cmd (@$pTurn) {
+        if ($cmd->{type} eq 'commands') {
+            mktUploadOneCommand($cmd);
+        } else {
+            die "ERROR: turn file contains invalid section '$cmd->{type}'\n";
+        }
+    }
+}
+
+
+sub mktUploadOneCommand {
+    my $cmd = shift;
+    my $pCommands = $cmd->{data};
+
+    my $query = join('&',
+                     httpBuildQuery(gameId => stateGet('gameid'),
+                                    playerId => stateGet('playerid'),
+                                    turn => stateGet('turn'),
+                                    version => '1.18',
+                                    savekey => stateGet('savekey'),
+                                    saveindex => '12'),
+                     @$pCommands,
+                     httpBuildQuery(keycount => 7+scalar(@$pCommands)));
+
+    my $reply = httpCall("POST /_ui/plugins?method=Save&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n", $query);
+    my $parsedReply = jsonParse($reply->{BODY});
+    if (exists($parsedReply->{success}) && $parsedReply->{success} =~ /true/i) {
+        print "++ Upload succeeded ++\n";
+    } else {
+        print "++ Upload failed ++\n";
+        print "Server answer:\n";
+        foreach (sort keys %$parsedReply) {
+            printf "%-20s %s\n", $_, $parsedReply->{$_};
+        }
+    }
 }
 
 
@@ -1969,7 +2081,7 @@ sub mktPackStocks {
 
     # Copy stocks
     my @stocks;
-    my $lastStockId = 100;
+    my $lastStockId = 0;
     foreach (@{$parsedReply->{rst}{stock}}) {
         push @stocks, { amount => $_->{amount},
                         builtamount => $_->{builtamount},
@@ -2067,7 +2179,7 @@ sub mktUpdateStock {
                               builtamount => $amount,
                               id => ++$$pLastStockId,
                               stockid => $stockId,
-                              stocktype => 1 };
+                              stocktype => $stockType };
         }
     }
 }
@@ -2100,7 +2212,7 @@ sub mktPackBase {
                   BuildTorpedoId => $b->{buildtorpedoid},
                   BuildBeamCount => $b->{buildbeamcount},
                   BuildTorpCount => $b->{buildtorpcount},
-                  IsBuilding => 'false');
+                  IsBuilding => 'true');
         } else {
             die "ERROR: starbase $b->{id}: Attempt to build an impossible ship\n";
         }
@@ -2114,8 +2226,8 @@ sub mktPackBase {
               IsBuilding => 'false');
     }
 
-    mktPack("Starbase".$b->{id},
-            Id => $b->{id},
+    mktPack("Starbase".$origBase->{id},
+            Id => $origBase->{id},
             Fighters => $b->{fighters},
             Defense => $b->{defense},
             BuiltFighters => $b->{fightersBuilt},
@@ -2239,14 +2351,15 @@ sub mktPackShip {
             Clans => $s->{clans},
             Ammo => $s->{ammo},
             @x,
-            TargetX => $s->{x} + $s->{dx},
-            TargetY => $s->{y} + $s->{dy},
+            TargetX => ($s->{x} + $s->{dx}) & 65535,
+            TargetY => ($s->{y} + $s->{dy}) & 65535,
             FriendlyCode => $s->{fcode},
             Warp => $s->{warp},
             Mission => $m,
             Mission1Target => $t1,
             Mission2Target => $t2,
             Enemy => $s->{enemy},
+            Waypoints => "",
             ReadyStatus => $origShip->{readystatus}
            );
 }
@@ -2263,6 +2376,11 @@ sub mktCompleteFlows {
         # Planet: supplies
         my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $p->{id});
         $p->{suppliesSold} = $origPlanet->{supplies} - $p->{supplies} + $origPlanet->{suppliessold};
+
+        # Structures
+        foreach (qw(mines factories defense)) {
+            $p->{suppliesSold} -= $p->{$_} - $origPlanet->{$_} + $origPlanet->{"built$_"};
+        }
 
         # Ship supplies
         foreach my $s (@$pShips) {
@@ -2586,7 +2704,9 @@ sub stateCheckReply {
         die "ERROR: received two different savekeys\n"
     }
     stateSet('savekey', $parsedReply->{savekey});
-    stateSet('player', $parsedReply->{rst}{player}{raceid});
+    stateSet('player', $parsedReply->{rst}{player}{raceid});     # user-visible player number ("7 = crystal")
+    stateSet('playerid', $parsedReply->{rst}{player}{id});       # internal player Id used for everything
+    stateSet('turn', $parsedReply->{rst}{settings}{turn});
 }
 
 sub doStatus {
@@ -2771,6 +2891,7 @@ sub jsonParse1 {
 }
 
 sub jsonDump {
+    my $fd = shift;
     my $tree = shift;
     my $prefix = shift;
     my $indent = "$prefix    ";
@@ -2778,53 +2899,53 @@ sub jsonDump {
         # Array.
         if (@$tree == 0) {
             # Empty
-            print "[]";
+            print $fd "[]";
         } elsif (grep {ref or /\D/} @$tree) {
             # Full form
-            print "[\n$indent";
+            print $fd "[\n$indent";
             my $i = 0;
             foreach (@$tree) {
-                print ",\n$indent" if $i;
+                print $fd ",\n$indent" if $i;
                 $i = 1;
-                jsonDump($_, $indent);
+                jsonDump($fd, $_, $indent);
             }
-            print "\n$prefix]";
+            print $fd "\n$prefix]";
         } else {
             # Short form
-            print "[";
+            print $fd "[";
             my $i = 0;
             foreach (@$tree) {
                 if ($i > 20) {
-                    print ",\n$indent";
+                    print $fd ",\n$indent";
                     $i = 0;
                 } else {
-                    print "," if $i;
+                    print $fd "," if $i;
                     ++$i;
                 }
-                jsonDump($_, $indent);
+                jsonDump($fd, $_, $indent);
             }
-            print "]";
+            print $fd "]";
         }
     } elsif (ref($tree) eq 'HASH') {
         # Hash
-        print "{";
+        print $fd "{";
         my $i = 0;
         foreach (sort keys %$tree) {
-            print "," if $i;
+            print $fd "," if $i;
             $i = 1;
-            print "\n$indent\"", stateQuote($_), "\": ";
-            jsonDump($tree->{$_}, $indent);
+            print $fd "\n$indent\"", stateQuote($_), "\": ";
+            jsonDump($fd, $tree->{$_}, $indent);
         }
-        print "\n$prefix" if $i;
-        print "}";
+        print $fd "\n$prefix" if $i;
+        print $fd "}";
     } else {
         # scalar
         if (!defined($tree)) {
-            print "null";
+            print $fd "null";
         } elsif ($tree =~ /^-?\d+$/) {
-            print $tree;
+            print $fd $tree;
         } else {
-            print '"', stateQuote($tree), '"';
+            print $fd '"', stateQuote($tree), '"';
         }
     }
 }
