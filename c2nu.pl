@@ -1371,13 +1371,15 @@ sub doRunHost {
                       httpBuildQuery(gameId => stateGet('gameid')));
     rhCheckFailure(jsonParse($reply->{BODY}));
 
-    # Wait 
+    # Wait
     print "Waiting for host to complete...\n";
     while (1) {
+        # 10 second interval, same as AJAX app
         sleep 5;
         $reply = httpCall("POST /_ui/plugins?method=CheckHostDone&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
                           httpBuildQuery(gameId => stateGet('gameid')));
         last if $reply->{BODY} ne '{}';
+        sleep 5;
     }
     rhCheckFailure(jsonParse($reply->{BODY}));
     print "++ Success ++\n";
@@ -1737,7 +1739,7 @@ sub rstSynthesizeMessages {
           my $did = 0;
           $text = "(-g0000)<<< Host Configuration >>>\n\n$_->[1]\n";
           foreach my $r (@{$parsedReply->{rst}{races}}) {
-              if (exists($r->{$key}) && exists($r->{adjective})) {
+              if (exists($r->{$key}) && exists($r->{adjective}) && $r->{id} != 0) {
                   $text .= sprintf("  %-15s", $r->{adjective})
                     . sprintf($fmt, $r->{$key})
                       . "\n";
@@ -2339,6 +2341,16 @@ sub mktPackShip {
               TransferTargetType => 0);
     }
 
+    my $enemy = 0;
+    if ($s->{enemy}) {
+        my $enemyRace = asearch($parsedReply->{rst}{players}, 'raceid', $s->{enemy});
+        if (!defined($enemyRace)) {
+            print "WARNING: ship $s->{id} has a Primary Enemy which is not in the game; ignored.\n";
+        } else {
+            $enemy = $enemyRace->{id};
+        }
+    }
+
     mktPack("Ship".$s->{id},
             Id => $s->{id},
             Name => $name,
@@ -2358,7 +2370,7 @@ sub mktPackShip {
             Mission => $m,
             Mission1Target => $t1,
             Mission2Target => $t2,
-            Enemy => $s->{enemy},
+            Enemy => $enemy,
             Waypoints => "",
             ReadyStatus => $origShip->{readystatus}
            );
