@@ -81,3 +81,12 @@ Differences between Nu data model and VGA Planets
   The VCR is almost compatible to Tim-VCR, it uses arithmetic rounding
   ("0.5 rounds up") instead of banker's rounding ("0.5 rounds towards
   nearest even").
+
+  Number of fighters in combat is computed differently. For planet
+  without base:
+  - Host: fighters, bays := round(sqrt(planetDefense))
+  - Nu:   fighters := round(sqrt(planetDefense - 0.75))
+          bays     := trunc(sqrt(planetDefense))
+  These are the formulas from the client. A planet with 21 DP has
+  4 bays/4 fighters in NuHost (5/5 in Host), which is evidence that
+  the "round" actually is "ERND" (banker's rounding).
