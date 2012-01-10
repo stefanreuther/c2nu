@@ -1851,7 +1851,7 @@ sub rstPackVcrs {
                        $o->{beamcount},
                        $o->{baycount},
                        $o->{torpedoid},
-                       $o->{torpedoid} ? $o->{torpedos} : $o->{fighters},
+                       $o->{baycount}==0 ? $o->{torpedos} : $o->{fighters},
                        $o->{launchercount});
         }
         $v .= pack("vv", $vcr->{left}{shield}, $vcr->{right}{shield});
