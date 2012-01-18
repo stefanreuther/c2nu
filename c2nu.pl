@@ -18,6 +18,7 @@
 #    --backups=0/1  disable/enable backup of received Nu RST files. Note
 #                   that those are rather big so it makes sense to compress
 #                   the backups.
+#    --dropmines=0/1  disable/enable removal of mines from PCC chart db
 #    --root=DIR     set root directory containing VGA Planets spec files.
 #                   Those are used to "fill in the blanks" not contained
 #                   in a Nu RST.
@@ -94,6 +95,9 @@ while (@ARGV) {
     } elsif ($ARGV[0] =~ /^--?backup=(\d+)/) {
         stateSet('backups', $1);
         shift @ARGV;
+    } elsif ($ARGV[0] =~ /^--?drop[-_]?mines=(\d+)/) {
+        stateSet('dropmines', $1);
+        shift @ARGV;
     } elsif ($ARGV[0] =~ /^--?root=(.*)/) {
         $opt_rootDir = $1;
         shift @ARGV;
@@ -162,6 +166,7 @@ sub doHelp {
     print "Options:\n";
     print "  --host=HOST       instead of 'planets.nu'\n";
     print "  --backups=0/1     disable/enable backup of Nu RST\n";
+    print "  --dropmines=0/1   disable/enable removal of minefields from chart DB\n";
     print "  --root=DIR        set root directory containing VGA Planets spec files\n\n";
     print "Commands:\n";
     print "  help              this help screen\n";
@@ -686,8 +691,64 @@ sub makeUtilData {
     # TODO: explosions. Problem is that PCC2 cannot yet display those.
     # TODO: enemy planet scans
 
+
+    # Drop mines
+    if (stateGet('dropmines')) {
+        makeDropMines($parsedReply, $player);
+    }
+
     close UTIL;
 }
+
+sub makeDropMines {
+    my $parsedReply = shift;
+    my $player = shift;
+    my %knownMines;
+    my $ndelete = 0;
+
+    # Generate list of known mines
+    foreach (@{$parsedReply->{rst}{minefields}}) {
+        $knownMines{$_->{id}} = 1;
+    }
+
+    # Open chart DB
+    my $cdb = "chart$player.cc";
+    if (!open(DB, "< $cdb")) { return }
+
+    # Read header
+    my $header;
+    if (read(DB, $header, 16) != 16) { die "$cdb: too short" }
+    my ($magic, $turn, $pos, $pprop, $sprop) = unpack "A8vvvv", $header;
+    seek DB, $pos, 0;
+
+    # Read blocks
+    while (read(DB, $header, 6)) {
+        my ($type, $size) = unpack "vV", $header;
+        if ($size > 1000000) {
+            print "ERROR: unable to parse chart database, impossible block size ($size)\n";
+            last;
+        }
+        my $data;
+        read DB, $data, $size;
+        if ($type == 4) {
+            # Minefields. 16 bytes per block.
+            for (my $pos = 0; $pos + 16 <= length($data); $pos += 16) {
+                my $id = unpack "v", substr($data, $pos, 2);
+                if (!exists($knownMines{$id})) {
+                    # This field is known to PCC, but not to Nu, not even as an old one,
+                    # so delete it. It must have nonzero coordinates to be accepted by
+                    # PCC, and zero units to be recognized as a deletion.
+                    utilWrite(0, pack("vvvvVv", $id, 1, 1, 1, 0, 0));
+                    ++$ndelete;
+                }
+            }
+        }
+    }
+    print "Wrote $ndelete minefield deletions.\n" if $ndelete;
+
+    close DB;
+}
+
 
 ######################################################################
 #
