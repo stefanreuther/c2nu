@@ -714,6 +714,7 @@ sub makeDropMines {
     # Open chart DB
     my $cdb = "chart$player.cc";
     if (!open(DB, "< $cdb")) { return }
+    binmode DB;
 
     # Read header
     my $header;
@@ -722,7 +723,7 @@ sub makeDropMines {
     seek DB, $pos, 0;
 
     # Read blocks
-    while (read(DB, $header, 6)) {
+    while (read(DB, $header, 6) == 6) {
         my ($type, $size) = unpack "vV", $header;
         if ($size > 1000000) {
             print "ERROR: unable to parse chart database, impossible block size ($size)\n";
