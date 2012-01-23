@@ -88,6 +88,8 @@ Step by Step
   There are a few more options; use 'perl c2nuvcr.pl --help' to see
   them.
 
+  To save combat for later viewing, keep the "vcrX.dat" files.
+
 
 
 How precise is it?
@@ -107,10 +109,22 @@ How precise is it?
 
 
 
+History
+--------
+
+  0.1 - 16/Dec/2011
+    initial version
+
+  0.2 - 23/Jan/2011
+    fix: some carriers are reported with a torpedo type, those were
+    handled wrong.
+
+
+
 Fine Print
 -----------
 
-  This program is (c) 2011 Stefan Reuther.
+  This program is (c) 2011,2012 Stefan Reuther.
 
   Send comments, questions, bug reports, and praise to <streu@gmx.de>.
 
