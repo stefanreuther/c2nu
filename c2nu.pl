@@ -85,12 +85,16 @@ my $opt_rootDir = "/usr/share/planets";
 
 # Initialisation
 stateSet('host', 'planets.nu');
+stateSet('api', 'api.planets.nu');
 stateLoad();
 
 # Parse arguments
 while (@ARGV) {
     if ($ARGV[0] =~ /^--?host=(.*)/) {
         stateSet('host', $1);
+        shift @ARGV;
+    } elsif ($ARGV[0] =~ /^--?api=(.*)/) {
+        stateSet('api', $1);
         shift @ARGV;
     } elsif ($ARGV[0] =~ /^--?backup=(\d+)/) {
         stateSet('backups', $1);
@@ -213,15 +217,15 @@ sub doLogin {
     my $user = $ARGV[0];
     my $pass = $ARGV[1];
 
-    my $reply = httpCall("POST /_ui/signin?method=Authenticate&type=get HTTP/1.0\n",
-                         httpBuildQuery(UserName => $user,
-                                        Password => $pass,
-                                        Remember => 'true'));
+    my $reply = httpCall('api', "POST /account/login?version=2 HTTP/1.0\n",
+                         httpBuildQuery(username => $user,
+                                        password => $pass));
 
     my $parsedReply = jsonParse($reply->{BODY});
-    if (exists($parsedReply->{success}) && $parsedReply->{success} =~ /true/i) {
+    if (exists($parsedReply->{success}) && ($parsedReply->{success} =~ /true/i || $parsedReply->{success})) {
         print "++ Login succeeded ++\n";
         stateSet('user', $user);
+        stateSet('apikey', $parsedReply->{apikey});
         foreach (sort keys %$reply) {
             if (/^COOKIE-(.*)/) {
                 stateSet("cookie_$1", $reply->{$_});
@@ -242,7 +246,7 @@ sub doLogin {
 #
 ######################################################################
 sub doList {
-    my $reply = httpCall("POST /_ui/plugins?method=Refresh&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.DashboardFunctions HTTP/1.0\n", "");
+    my $reply = httpCall('host', "POST /_ui/plugins?method=Refresh&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.DashboardFunctions HTTP/1.0\n", "");
     my $parsedReply = jsonParse($reply->{BODY});
     my $needHeader = 1;
     if (exists($parsedReply->{games})) {
@@ -364,8 +368,15 @@ sub doDownloadResult {
     }
     stateSet('gameid', $gameId);
 
-    my $reply = httpCall("POST /_ui/plugins?method=LoadGameData&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
-                         httpBuildQuery(gameId => $gameId));
+    # new address:
+    # http://api2.planets.nu/game/loadturn?jsoncallback=jQuery171016469020383717126_1391108318831&gameid=20237&apikey=40b9e1a5-3a9d-46b2-9815-67a18c302b6e&forsave=true&_=1391108356283
+    # my $reply = httpCall('host', "POST /_ui/plugins?method=LoadGameData&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+    #                      httpBuildQuery(gameId => $gameId));
+    my $reply = httpCall('api', "POST /game/loadturn HTTP/1.0\n",
+                         httpBuildQuery(gameid => $gameId,
+                                        apikey => stateGet('apikey'),
+                                        forsave => "true",
+                                        activity => "true"));
 
     print "Saving output...\n";
     open OUT, "> c2rst.txt" or die "c2rst.txt: $!\n";
@@ -1421,7 +1432,7 @@ sub doRunHost {
 
     # Mark turn done
     print "Marking turn done...\n";
-    my $reply = httpCall("POST /_ui/plugins?method=SetTurnReady&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+    my $reply = httpCall('host', "POST /_ui/plugins?method=SetTurnReady&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
                          httpBuildQuery(gameId => stateGet('gameid'),
                                         playerId => stateGet('playerid'),
                                         ready => "true"));
@@ -1429,7 +1440,7 @@ sub doRunHost {
 
     # Run host
     print "Running host...\n";
-    $reply = httpCall("POST /_ui/plugins?method=HostGame&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+    $reply = httpCall('host', "POST /_ui/plugins?method=HostGame&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
                       httpBuildQuery(gameId => stateGet('gameid')));
     rhCheckFailure(jsonParse($reply->{BODY}));
 
@@ -1438,7 +1449,7 @@ sub doRunHost {
     while (1) {
         # 10 second interval, same as AJAX app
         sleep 5;
-        $reply = httpCall("POST /_ui/plugins?method=CheckHostDone&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
+        $reply = httpCall('host', "POST /_ui/plugins?method=CheckHostDone&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
                           httpBuildQuery(gameId => stateGet('gameid')));
         last if $reply->{BODY} ne '{}';
         sleep 5;
@@ -2124,7 +2135,7 @@ sub mktUploadOneCommand {
                      @$pCommands,
                      httpBuildQuery(keycount => 7+scalar(@$pCommands)));
 
-    my $reply = httpCall("POST /_ui/plugins?method=Save&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n", $query);
+    my $reply = httpCall('host', "POST /_ui/plugins?method=Save&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n", $query);
     my $parsedReply = jsonParse($reply->{BODY});
     if (exists($parsedReply->{success}) && $parsedReply->{success} =~ /true/i) {
         print "++ Upload succeeded ++\n";
@@ -2774,9 +2785,10 @@ sub stateCheckReply {
     if (!$parsedReply->{rst}{player}{raceid}) {
         die "ERROR: result does not contain player name\n";
     }
-    if ($parsedReply->{rst}{player}{savekey} ne $parsedReply->{savekey}) {
-        die "ERROR: received two different savekeys\n"
-    }
+    # Since 2012/02/10. the player objects no longer contain savekeys.
+    # if ($parsedReply->{rst}{player}{savekey} ne $parsedReply->{savekey}) {
+    #     die "ERROR: received two different savekeys\n"
+    # }
     stateSet('savekey', $parsedReply->{savekey});
     stateSet('player', $parsedReply->{rst}{player}{raceid});     # user-visible player number ("7 = crystal")
     stateSet('playerid', $parsedReply->{rst}{player}{id});       # internal player Id used for everything
@@ -2803,13 +2815,14 @@ sub doStatus {
 
 sub httpCall {
     # Prepare
-    my ($head, $body) = @_;
-    my $host = stateGet('host');
+    my ($name, $head, $body) = @_;
+    my $host = stateGet($name);
     my $keks = stateCookies();
     $head .= "Host: $host\n";
     $head .= "Content-Length: " . length($body) . "\n";
     $head .= "Connection: close\n";
     $head .= "Cookie: $keks\n" if $keks ne '';
+    $head .= "Content-Type: application/x-www-form-urlencoded; charset=UTF-8\n" if $body ne '';
     # $head .= "User-Agent: $0\n";
     $head =~ s/\n/\r\n/;
     $head .= "\r\n";
