@@ -15,6 +15,7 @@
 #
 #  Options:
 #    --host=H       set host name (setting will be stored in state file)
+#    --api=H        set API host name (setting will be stored in state file)
 #    --backups=0/1  disable/enable backup of received Nu RST files. Note
 #                   that those are rather big so it makes sense to compress
 #                   the backups.
@@ -168,7 +169,8 @@ sub doHelp {
     print "$0 - planets.nu interface - version $VERSION, (c) 2011-2012,2016 Stefan Reuther\n\n";
     print "$0 [options] command [command args]\n\n";
     print "Options:\n";
-    print "  --host=HOST       instead of 'planets.nu'\n";
+    print "  --host=HOST       instead of 'planets.nu' (deprecated)\n";
+    print "  --api=HOST        instead of 'api.planets.nu'\n";
     print "  --backups=0/1     disable/enable backup of Nu RST\n";
     print "  --dropmines=0/1   disable/enable removal of minefields from chart DB\n";
     print "  --root=DIR        set root directory containing VGA Planets spec files\n\n";
