@@ -81,7 +81,7 @@ use Socket;
 use IO::Handle;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.2";
+my $VERSION = "0.3";
 my $opt_rootDir = "/usr/share/planets";
 
 # Initialisation

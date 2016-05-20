@@ -119,12 +119,15 @@ History
     fix: some carriers are reported with a torpedo type, those were
     handled wrong.
 
+  0.3 - 20/May/2016
+    adapt to new server-side API
+
 
 
 Fine Print
 -----------
 
-  This program is (c) 2011,2012 Stefan Reuther.
+  This program is (c) 2011,2012,2016 Stefan Reuther.
 
   Send comments, questions, bug reports, and praise to <streu@gmx.de>.
 
