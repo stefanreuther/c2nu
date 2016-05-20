@@ -63,7 +63,7 @@
 #endif
 #  Instructions:
 #  - make a directory and go there using the command prompt
-#  - log in using 'c2nu --host=planets.nu login USER PASS'
+#  - log in using 'c2nu login USER PASS'
 #  - list games using 'c2nu list'
 #  - download stuff using 'c2nu --root=DIR vcr', where DIR is the
 #    directory containing your VGA Planets installation, or PCC2's
@@ -73,14 +73,14 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012 Stefan Reuther
+#  (c) 2011-2012,2016 Stefan Reuther
 #
 use strict;
 use Socket;
 use IO::Handle;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.1";
+my $VERSION = "0.2";
 my $opt_rootDir = "/usr/share/planets";
 
 # Initialisation
@@ -165,7 +165,7 @@ exit 0;
 #
 ######################################################################
 sub doHelp {
-    print "$0 - planets.nu interface - version $VERSION, (c) 2011-2012 Stefan Reuther\n\n";
+    print "$0 - planets.nu interface - version $VERSION, (c) 2011-2012,2016 Stefan Reuther\n\n";
     print "$0 [options] command [command args]\n\n";
     print "Options:\n";
     print "  --host=HOST       instead of 'planets.nu'\n";
@@ -246,59 +246,16 @@ sub doLogin {
 #
 ######################################################################
 sub doList {
-    my $reply = httpCall('host', "POST /_ui/plugins?method=Refresh&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.DashboardFunctions HTTP/1.0\n", "");
+    my $reply = httpCall('api', "POST /account/mygames?version=2 HTTP/1.0\n", httpBuildQuery(apikey => stateGet('apikey')));
     my $parsedReply = jsonParse($reply->{BODY});
     my $needHeader = 1;
     if (exists($parsedReply->{games})) {
-        my $parsedXML = xmlParse($parsedReply->{games});
-        foreach my $table (xmlIndirectChildren('table', $parsedXML)) {
-            my @rows = xmlIndirectChildren('tr', @{$table->{CONTENT}});
-
-            # Find game type
-            my $type = "Games";
-            if (@rows
-                && $rows[0]{CONTENT}[0]{TAG} eq 'th'
-                && !ref($rows[0]{CONTENT}[0]{CONTENT}[0]))
-            {
-                $type = $rows[0]{CONTENT}[0]{CONTENT}[0];
-                shift @rows;
-            }
-
-            # Find game number: there is a link with "planetsDashboard.loadGame(<nr>);return false"
-            my $gameNr = 0;
-            foreach my $a (xmlIndirectChildren('a', xmlMergeContent(@rows))) {
-                if (exists($a->{onclick}) && $a->{onclick} =~ m#planetsDashboard.loadGame\((\d+)\)#) {
-                    $gameNr = $1;
-                }
-            }
-            next if !$gameNr;
-
-            # Find race: there is an image at "http://library.vgaplanets.nu/races/<race>.png"
-            my $race = 0;
-            foreach my $img (xmlIndirectChildren('img', xmlMergeContent(@rows))) {
-                if (exists($img->{src}) && $img->{src} =~ m#/races/(\d+)\.(png|jpg|gif)#i) {
-                    $race = $1;
-                }
-            }
-
-            # Find game name: for real games, there is a link to "/games/<nr>".
-            # For training games, there's a <div> starting with the number
-            my $gameName = "";
-            foreach my $a (xmlIndirectChildren('a', xmlMergeContent(@rows))) {
-                if (exists($a->{href}) && $a->{href} =~ m#/games/(\d+)#) {
-                    print "WARNING: game '$gameNr' links to '$1'\n" if $1 ne $gameNr;
-                    $gameName = xmlTextContent(@{$a->{CONTENT}});
-                }
-            }
-            if ($gameName eq '') {
-                foreach my $div (xmlIndirectChildren('div', xmlMergeContent(@rows))) {
-                    my $text = xmlTextContent(@{$div->{CONTENT}});
-                    if ($text =~ /^$gameNr:/) {
-                        $gameName = $text;
-                    }
-                }
-            }
-            $gameName =~ s/^$gameNr:\s+//;
+        foreach (@{$parsedReply->{games}}) {
+            my $gameName = $_->{game}{name} || '?';
+            my $gameNr   = $_->{game}{id}   || 0;
+            my $type     = $_->{game}{gametype} == 2 ? 'Normal' :
+                $_->{game}{gametype} == 1 ? 'Training' : '?';
+            my $race = $_->{player}{raceid} || '?';
 
             # Print
             print "Game      Name                                      Race  Category\n" if $needHeader;
@@ -368,10 +325,6 @@ sub doDownloadResult {
     }
     stateSet('gameid', $gameId);
 
-    # new address:
-    # http://api2.planets.nu/game/loadturn?jsoncallback=jQuery171016469020383717126_1391108318831&gameid=20237&apikey=40b9e1a5-3a9d-46b2-9815-67a18c302b6e&forsave=true&_=1391108356283
-    # my $reply = httpCall('host', "POST /_ui/plugins?method=LoadGameData&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
-    #                      httpBuildQuery(gameId => $gameId));
     my $reply = httpCall('api', "POST /game/loadturn HTTP/1.0\n",
                          httpBuildQuery(gameid => $gameId,
                                         apikey => stateGet('apikey'),
@@ -2836,6 +2789,8 @@ sub httpCall {
     HTTP->autoflush(1);
     connect(HTTP, $paddr) or die "ERROR: unable to connect to '$host': $!\n";
 
+    # print "\033[36m$head$body\033[0m\n";
+
     # Send request
     print HTTP $head, $body;
 
@@ -3035,141 +2990,6 @@ sub jsonDump {
             print $fd '"', stateQuote($tree), '"';
         }
     }
-}
-
-######################################################################
-#
-#  XML
-#
-######################################################################
-
-# DOM:
-#   a document is a list of items.
-#   an item is a string or a tag.
-#   a tag is an embedded hash:
-#     TAG => tag name
-#     CONTENT => content, reference to a document
-#     name => attribute
-
-sub xmlParse {
-    my $str = shift;
-    pos($str) = 0;
-    my @stack = ({CONTENT=>[]});
-    while (1) {
-        if ($str =~ m|\G$|) {
-            last
-        } elsif ($str =~ m|\G</(\w+)>|gc) {
-            if (!exists($stack[-1]->{TAG}) || $stack[-1]->{TAG} ne $1) {
-                die "XML syntax error: got '</$1>' while expecting another\n";
-            }
-            pop @stack;
-        } elsif ($str =~ m|\G<!--.*?-->|gc) {
-            # Comment
-        } elsif ($str =~ m|\G<(\w+)\s*|gc) {
-            # Opening tag
-            my $t = {TAG=>$1, CONTENT=>[]};
-            push @{$stack[-1]->{CONTENT}}, $t;
-            push @stack, $t;
-
-            # Read attributes
-            while ($str =~ m|\G(\w+)\s*=\"([^"]*)\"\s*|gc || $str =~ m|\G(\w+)\s*=\'([^']*)\'\s*|gc) {       #"){
-                $t->{lc($1)} = xmlUnquote($2);
-            }
-
-            # Close
-            if ($str =~ m|\G/\s*>|gc) {
-                pop @stack;
-            } elsif ($str =~ m|\G>|gc) {
-                # keep
-            } else {
-                die "XML syntax error: got '" . substr($str, pos($str), 20) . "' while expecting tag end\n";
-            }
-        } elsif ($str =~ m|\G([^<]+)|sgc) {
-            push @{$stack[-1]->{CONTENT}}, xmlUnquote($1);
-        } else {
-            die "XML syntax error: got '" . substr($str, pos($str), 20) . "' while expecting tag or text\n";
-        }
-    }
-    $stack[0];
-}
-
-sub xmlUnquote {
-    my $str = shift;
-    $str =~ s|&(.*?);|xmlEntity($1)|eg;
-    $str;
-}
-
-sub xmlEntity {
-    my $x = shift;
-    if ($x eq 'lt') { return "<" }
-    if ($x eq 'gt') { return ">" }
-    if ($x eq 'amp') { return "&" }
-    if ($x eq 'quot') { return "\"" }
-    if ($x eq 'apos') { return "'" }
-    if ($x =~ /^\#(\d+)/) { return chr($1) }
-    if ($x =~ /^\#x([0-9a-f]+)/i) { return chr(hex($1)) }
-    return "?";
-}
-
-sub xmlPrint {
-    my $xml = shift;
-    my $indent = shift || "";
-    if (exists $xml->{TAG}) {
-        print "$indent <$xml->{TAG}>\n";
-        foreach my $k (sort keys %$xml) {
-            print "$indent   \@$k=$xml->{$k}\n"
-                unless $k eq 'TAG' || $k eq 'CONTENT';
-        }
-    } else {
-        print "$indent ROOT\n";
-    }
-    foreach (@{$xml->{CONTENT}}) {
-        if (ref) {
-            xmlPrint($_, "$indent    ");
-        } else {
-            print "$indent     \"$_\"\n";
-        }
-    }
-}
-
-# xmlDirectChildren($tag, @list)
-#   Given a list of items, extract all that have a particular tag name.
-#   Somehow like XPath "<list>/tag".
-sub xmlDirectChildren {
-    my $tag = shift;
-    grep {ref($_) && $_->{TAG} eq $tag} @_;
-}
-
-# xmlIndirectChildren($tag, @list)
-#   Like xmlDirectChildren, but searches indirect children as well.
-#   Somehow like XPath "<list>//tag".
-sub xmlIndirectChildren {
-    my $tag = shift;
-    my @result;
-    foreach (@_) {
-        if (ref($_)) {
-            if (exists($_->{TAG}) && $_->{TAG} eq $tag) {
-                push @result, $_
-            } else {
-                push @result, xmlIndirectChildren($tag, @{$_->{CONTENT}});
-            }
-        }
-    }
-    @result;
-}
-
-# Given a list of tags, merge its content into one list
-sub xmlMergeContent {
-    my @result;
-    foreach (@_) {
-        push @result, @{$_->{CONTENT}};
-    }
-    @result;
-}
-
-# Find content.
-sub xmlTextContent {
-    join ('', grep {!ref($_)} @_);
 }
 
 ######################################################################
