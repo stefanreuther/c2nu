@@ -70,6 +70,17 @@
 #    'specs' direcory. Alternatively, copy a 'hullfunc.dat' file
 #    into the current directory before downloading the game.
 #
+#if CMD_UNPACK && CMD_MAKETURN
+#  To play a training game using a VGAP3 client (preferrably PCC2,
+#  that's what c2nu is optimized for):
+#  - make a directory, log in, list
+#  - download a turn using 'c2nu unpack'
+#  - play game
+#  - upload using 'c2nu maketurn'
+#  - run host using 'c2nu runhost'
+#  - repeat from step 2
+#
+#endif
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
