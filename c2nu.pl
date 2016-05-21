@@ -11,10 +11,9 @@
 #  specification files, RST, and some history data.
 #
 #  Usage:
-#    perl c2nu.pl [--host=H] [--backups=[01]] [--root=DIR] CMD [ARGS...]
+#    perl c2nu.pl [--api=H] [--backups=[01]] [--root=DIR] CMD [ARGS...]
 #
 #  Options:
-#    --host=H       set host name (setting will be stored in state file)
 #    --api=H        set API host name (setting will be stored in state file)
 #    --backups=0/1  disable/enable backup of received Nu RST files. Note
 #                   that those are rather big so it makes sense to compress
@@ -85,16 +84,12 @@ my $VERSION = "0.3";
 my $opt_rootDir = "/usr/share/planets";
 
 # Initialisation
-stateSet('host', 'planets.nu');
 stateSet('api', 'api.planets.nu');
 stateLoad();
 
 # Parse arguments
 while (@ARGV) {
-    if ($ARGV[0] =~ /^--?host=(.*)/) {
-        stateSet('host', $1);
-        shift @ARGV;
-    } elsif ($ARGV[0] =~ /^--?api=(.*)/) {
+    if ($ARGV[0] =~ /^--?api=(.*)/) {
         stateSet('api', $1);
         shift @ARGV;
     } elsif ($ARGV[0] =~ /^--?backup=(\d+)/) {
@@ -169,7 +164,6 @@ sub doHelp {
     print "$0 - planets.nu interface - version $VERSION, (c) 2011-2012,2016 Stefan Reuther\n\n";
     print "$0 [options] command [command args]\n\n";
     print "Options:\n";
-    print "  --host=HOST       instead of 'planets.nu' (deprecated)\n";
     print "  --api=HOST        instead of 'api.planets.nu'\n";
     print "  --backups=0/1     disable/enable backup of Nu RST\n";
     print "  --dropmines=0/1   disable/enable removal of minefields from chart DB\n";
@@ -219,7 +213,7 @@ sub doLogin {
     my $user = $ARGV[0];
     my $pass = $ARGV[1];
 
-    my $reply = httpCall('api', "POST /account/login?version=2 HTTP/1.0\n",
+    my $reply = httpCall("POST /account/login?version=2 HTTP/1.0\n",
                          httpBuildQuery(username => $user,
                                         password => $pass));
 
@@ -248,7 +242,7 @@ sub doLogin {
 #
 ######################################################################
 sub doList {
-    my $reply = httpCall('api', "POST /account/mygames?version=2 HTTP/1.0\n", httpBuildQuery(apikey => stateGet('apikey')));
+    my $reply = httpCall("POST /account/mygames?version=2 HTTP/1.0\n", httpBuildQuery(apikey => stateGet('apikey')));
     my $parsedReply = jsonParse($reply->{BODY});
     my $needHeader = 1;
     if (exists($parsedReply->{games})) {
@@ -327,7 +321,7 @@ sub doDownloadResult {
     }
     stateSet('gameid', $gameId);
 
-    my $reply = httpCall('api', "POST /game/loadturn HTTP/1.0\n",
+    my $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
                          httpBuildQuery(gameid => $gameId,
                                         apikey => stateGet('apikey'),
                                         forsave => "true",
@@ -1387,35 +1381,25 @@ sub doRunHost {
 
     # Mark turn done
     print "Marking turn done...\n";
-    my $reply = httpCall('host', "POST /_ui/plugins?method=SetTurnReady&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
-                         httpBuildQuery(gameId => stateGet('gameid'),
-                                        playerId => stateGet('playerid'),
-                                        ready => "true"));
+    my $reply = httpCall("POST /game/turnready HTTP/1.0\n",
+                         httpBuildQuery(gameid => stateGet('gameid'),
+                                        playerid => stateGet('playerid'),
+                                        ready => "true",
+                                        apikey => stateGet('apikey')));
     rhCheckFailure(jsonParse($reply->{BODY}));
 
     # Run host
     print "Running host...\n";
-    $reply = httpCall('host', "POST /_ui/plugins?method=HostGame&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
-                      httpBuildQuery(gameId => stateGet('gameid')));
-    rhCheckFailure(jsonParse($reply->{BODY}));
-
-    # Wait
-    print "Waiting for host to complete...\n";
-    while (1) {
-        # 10 second interval, same as AJAX app
-        sleep 5;
-        $reply = httpCall('host', "POST /_ui/plugins?method=CheckHostDone&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n",
-                          httpBuildQuery(gameId => stateGet('gameid')));
-        last if $reply->{BODY} ne '{}';
-        sleep 5;
-    }
+    $reply = httpCall("POST /game/runhost HTTP/1.0\n",
+                      httpBuildQuery(gameid => stateGet('gameid'),
+                                     apikey => stateGet('apikey')));
     rhCheckFailure(jsonParse($reply->{BODY}));
     print "++ Success ++\n";
 }
 
 sub rhCheckFailure {
     my $reply = shift;
-    if (!(exists($reply->{success}) && $reply->{success} =~ /true/i)) {
+    if (!(exists($reply->{success}) && $reply->{success})) {
         print "++ Failure ++\n";
         print "Server answer:\n";
         foreach (sort keys %$reply) {
@@ -2081,18 +2065,19 @@ sub mktUploadOneCommand {
     my $pCommands = $cmd->{data};
 
     my $query = join('&',
-                     httpBuildQuery(gameId => stateGet('gameid'),
-                                    playerId => stateGet('playerid'),
+                     httpBuildQuery(gameid => stateGet('gameid'),
+                                    playerid => stateGet('playerid'),
                                     turn => stateGet('turn'),
-                                    version => '1.18',
+                                    version => '3.02',
                                     savekey => stateGet('savekey'),
-                                    saveindex => '12'),
+                                    apikey => stateGet('apikey'),
+                                    saveindex => '2'),
                      @$pCommands,
-                     httpBuildQuery(keycount => 7+scalar(@$pCommands)));
+                     httpBuildQuery(keycount => 8+scalar(@$pCommands)));
 
-    my $reply = httpCall('host', "POST /_ui/plugins?method=Save&type=get&assembly=PlanetsNu.dll&object=PlanetsNu.GameFunctions HTTP/1.0\n", $query);
+    my $reply = httpCall("POST /game/save HTTP/1.0\n", $query);
     my $parsedReply = jsonParse($reply->{BODY});
-    if (exists($parsedReply->{success}) && $parsedReply->{success} =~ /true/i) {
+    if (exists($parsedReply->{success}) && $parsedReply->{success}) {
         print "++ Upload succeeded ++\n";
     } else {
         print "++ Upload failed ++\n";
@@ -2770,8 +2755,8 @@ sub doStatus {
 
 sub httpCall {
     # Prepare
-    my ($name, $head, $body) = @_;
-    my $host = stateGet($name);
+    my ($head, $body) = @_;
+    my $host = stateGet('api');
     my $keks = stateCookies();
     $head .= "Host: $host\n";
     $head .= "Content-Length: " . length($body) . "\n";
@@ -2832,7 +2817,7 @@ sub httpCall {
     }
 
     # Body might be compressed; decompress it
-    if (lc($reply{'content-encoding'}) eq 'gzip') {
+    if (exists $reply{'content-encoding'} && lc($reply{'content-encoding'}) eq 'gzip') {
         print "Decompressing result...\n";
         open TMP, "> c2nu.gz" or die "Cannot open temporary file: $!\n";
         binmode TMP;

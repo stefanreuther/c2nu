@@ -119,7 +119,7 @@ History
     fix: some carriers are reported with a torpedo type, those were
     handled wrong.
 
-  0.3 - 20/May/2016
+  0.3 - 21/May/2016
     adapt to new server-side API
 
 
