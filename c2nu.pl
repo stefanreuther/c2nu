@@ -29,9 +29,10 @@
 #    login USER PW  Log in with user Id and password
 #    list           List games (must be logged in)
 #if CMD_RST
-#    rst [GAME]     Download Nu RST (must be logged in). GAME is the game
+#    rst [GAME [TRN]]    Download Nu RST (must be logged in). GAME is the game
 #                   number and can be omitted on second and later uses.
 #                   Convert the Nu RST file to VGAP RST.
+#                   TRN is the Turn-Number to get, if ommitted it takes the last one.
 #endif
 #if CMD_UNPACK
 #    unpack [GAME]  Download Nu RST and create DAT/DIS files. This has the
@@ -84,7 +85,7 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016 Stefan Reuther
+#  (c) 2011-2012,2016 Stefan Reuther with additions by Qapla
 #
 use strict;
 use Socket;
@@ -320,6 +321,8 @@ sub doVcr {
 
 sub doDownloadResult {
     my $gameId;
+    my $dtrn;
+    my $reply;
     if (@ARGV == 0) {
         $gameId = stateGet('gameid');
         if (!$gameId) {
@@ -327,16 +330,32 @@ sub doDownloadResult {
         }
     } elsif (@ARGV == 1) {
         $gameId = shift @ARGV;
+        $dtrn = 0;
+    } elsif (@ARGV == 2) {
+        $gameId = shift @ARGV;
+        $dtrn = shift @ARGV;
     } else {
-        die "rst1: need one parameter: game name\n";
+        die "rst1: need one parameter: game name (+ turnnumber)\n";
     }
+    print "Getting Game ", $gameId, " and turn #", $dtrn, " ...\n";
     stateSet('gameid', $gameId);
-
-    my $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
-                         httpBuildQuery(gameid => $gameId,
-                                        apikey => stateGet('apikey'),
-                                        forsave => "true",
-                                        activity => "true"));
+    stateSet('turn', $dtrn);
+    if ($dtrn != 0) {
+        print "Getting turn #", $dtrn, " ...\n";
+        $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
+                          httpBuildQuery(gameid => $gameId,
+                                         apikey => stateGet('apikey'),
+                                         forsave => "true",
+                                         activity => "true",
+                                         turn => $dtrn));
+    } else {
+        print "Getting actual turnfile...\n";
+        $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
+                          httpBuildQuery(gameid => $gameId,
+                                         apikey => stateGet('apikey'),
+                                         forsave => "true",
+                                         activity => "true"));
+    }
 
     print "Saving output...\n";
     open OUT, "> c2rst.txt" or die "c2rst.txt: $!\n";
@@ -1907,9 +1926,11 @@ sub rstWriteMessages {
 sub rstFormatMessage {
     # Let's play simple: since our target is PCC2 which can do word wrapping,
     # we don't have to. Just remove the HTML.
+    # Added Wordwrapping for use in VPA - Quapla
     my $text = shift;
     $text =~ s|[\s\r\n]+| |g;
     $text =~ s| *<br */?> *|\n|g;
+    $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     $text;
 }
 
