@@ -350,7 +350,6 @@ sub doDownloadResult {
     } else {
         die "rst1: need one parameter: game name (+ turnnumber)\n";
     }
-    print "Getting Game ", $gameId, " and turn #", $dtrn, " ...\n";
     stateSet('gameid', $gameId);
     stateSet('turn', $dtrn);
     if ($dtrn != 0) {
@@ -362,7 +361,7 @@ sub doDownloadResult {
                                          activity => "true",
                                          turn => $dtrn));
     } else {
-        print "Getting actual turnfile...\n";
+        print "Getting current turnfile...\n";
         $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
                           httpBuildQuery(gameid => $gameId,
                                          apikey => stateGet('apikey'),
