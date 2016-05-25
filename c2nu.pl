@@ -22,6 +22,8 @@
 #    --root=DIR     set root directory containing VGA Planets spec files.
 #                   Those are used to "fill in the blanks" not contained
 #                   in a Nu RST.
+#    --rst=FILE     Name of result file (default: c2rst.txt)
+#    --trn=FILE     Name of turn file (default: c2trn.txt)
 #
 #  Commands:
 #    help           Help screen (no network access)
@@ -54,6 +56,9 @@
 #  All download commands can be split in two halves, i.e. "vcr1 [GAME]"
 #  to perform the download, and "vcr2" to convert the download without
 #  accessing the network.
+#
+#  You can use the second-half command with "--rst=file" to convert a
+#  different file (like: a backup).
 #
 #if CMD_MAKETURN
 #  Likewise, "maketurn" can be split into "maketurn1" (to prepare the
@@ -94,6 +99,8 @@ use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicod
 
 my $VERSION = "0.3";
 my $opt_rootDir = "/usr/share/planets";
+my $opt_rst = "c2rst.txt";
+my $opt_trn = "c2trn.txt";
 
 # Initialisation
 stateSet('api', 'api.planets.nu');
@@ -112,6 +119,12 @@ while (@ARGV) {
         shift @ARGV;
     } elsif ($ARGV[0] =~ /^--?root=(.*)/) {
         $opt_rootDir = $1;
+        shift @ARGV;
+    } elsif ($ARGV[0] =~ /^--?rst=(.*)/) {
+        $opt_rst = $1;
+        shift @ARGV;
+    } elsif ($ARGV[0] =~ /^--?trn=(.*)/) {
+        $opt_trn = $1;
         shift @ARGV;
     } else {
         last;
@@ -285,7 +298,7 @@ sub doList {
 
 sub doWriteVcr {
     # Read state
-    my $body = readFile("c2rst.txt");
+    my $body = readFile($opt_rst);
     print "Parsing result...\n";
     doVcr(jsonParse($body));
 }
@@ -358,7 +371,7 @@ sub doDownloadResult {
     }
 
     print "Saving output...\n";
-    open OUT, "> c2rst.txt" or die "c2rst.txt: $!\n";
+    open OUT, "> $opt_rst" or die "$opt_rst: $!\n";
     print OUT $reply->{BODY};
     close OUT;
 
@@ -383,7 +396,7 @@ sub doDownloadResult {
 
 sub doWriteResult {
     # Read state
-    my $body = readFile("c2rst.txt");
+    my $body = readFile($opt_rst);
     print "Parsing result...\n";
     doResult(jsonParse($body));
 }
@@ -749,7 +762,7 @@ sub makeDropMines {
 
 sub doUnpack {
     # Read state
-    my $body = readFile("c2rst.txt");
+    my $body = readFile($opt_rst);
     print "Parsing result...\n";
     my $parsedReply = jsonParse($body);
     stateCheckReply($parsedReply);
@@ -1447,7 +1460,7 @@ sub rhCheckFailure {
 
 sub doDump {
     # Read state
-    my $body = readFile("c2rst.txt");
+    my $body = readFile($opt_rst);
     jsonDump(\*STDOUT, jsonParse($body), "");
 }
 
@@ -2023,7 +2036,7 @@ sub rstMapOwnerToRace {
 sub doMakeTurn {
     # Load old state
     print "Reading result...\n";
-    my $parsedReply = jsonParse(readFile("c2rst.txt"));
+    my $parsedReply = jsonParse(readFile($opt_rst));
     stateCheckReply($parsedReply);
     my $player = $parsedReply->{rst}{player}{id};
     my $race = rstMapOwnerToRace($parsedReply, $player);
@@ -2067,8 +2080,8 @@ sub doMakeTurn {
                     data=>\@turn } ];
 
     # Save turn
-    print "Making c2trn.txt...\n";
-    open TRN, "> c2trn.txt" or die "c2trn.txt: $!\n";
+    print "Making $opt_trn...\n";
+    open TRN, "> $opt_trn" or die "$opt_trn: $!\n";
     jsonDump(\*TRN, $pTurn, "");
     #foreach (@turn) {
     #    print TRN "$_\n";
@@ -2079,7 +2092,7 @@ sub doMakeTurn {
 sub doUploadTurn {
     # Load the turn file
     print "Loading turn file...\n";
-    my $pTurn = jsonParse(readFile("c2trn.txt"));
+    my $pTurn = jsonParse(readFile($opt_trn));
 
     # Process it
     foreach my $cmd (@$pTurn) {
