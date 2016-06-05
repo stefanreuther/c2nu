@@ -341,6 +341,7 @@ sub doDownloadResult {
         if (!$gameId) {
             die "rst1: need one parameter: game name\n";
         }
+        $dtrn = 0;
     } elsif (@ARGV == 1) {
         $gameId = shift @ARGV;
         $dtrn = 0;
@@ -2448,7 +2449,7 @@ sub mktCompleteFlows {
 
         # Structures
         foreach (qw(mines factories defense)) {
-            $p->{suppliesSold} -= $p->{$_} - $origPlanet->{$_} + $origPlanet->{"built$_"};
+            $p->{suppliesSold} -= $p->{$_} - $origPlanet->{$_};
         }
 
         # Ship supplies
