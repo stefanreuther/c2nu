@@ -90,3 +90,10 @@ Differences between Nu data model and VGA Planets
   These are the formulas from the client. A planet with 21 DP has
   4 bays/4 fighters in NuHost (5/5 in Host), which is evidence that
   the "round" actually is "ERND" (banker's rounding).
+
+  Maximum structures is computed differently. The general formula is
+      maxStructures := clans                         if clans <= limit
+                       limit + round(clans - limit)  otherwise
+  (with limit=50 for defense, 100 for factories, 200 for mines).
+  Host uses ERND, PHost uses Round, which makes no difference in
+  practice. Nu uses Trunc and thus allows fewer buildings.
