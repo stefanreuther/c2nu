@@ -1282,6 +1282,9 @@ sub unpPackShips {
             }
             $dis .= "\0" x 14;
 
+            if ($ship->{transfertargettype} == 3) {
+                print "WARNING: Jettison not implemented yet\n";
+            }
             if ($ship->{transfermegacredits} || $ship->{transferammo}) {
                 print "WARNING: transfer of mc and/or ammo not implemented yet\n";
             }
@@ -1754,6 +1757,9 @@ sub rstSynthesizeMessages {
                                     $parsedReply->{rst}{game},
                                     [name=>"Game Name: %s"], [description=>"Description: %s"], "\n", [hostdays=>"Host Days: %s"],
                                     [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"]);
+    # Wordwrap for VPA
+    $text =~ s| *<br */?> *| |g;
+    $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     push @result, rstEncryptMessage($text) if defined($text);
 
     # Settings II (from 'settings')
@@ -1940,10 +1946,12 @@ sub rstFormatMessage {
     # Let's play simple: since our target is PCC2 which can do word wrapping,
     # we don't have to. Just remove the HTML.
     # Added Wordwrapping for use in VPA - Quapla
+    # Todo: Set new-Line before each ID#
     my $text = shift;
     $text =~ s|[\s\r\n]+| |g;
     $text =~ s| *<br */?> *|\n|g;
-    $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
+    $text =~ s| ID#|\nID#|g;
+    $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     $text;
 }
 
@@ -2365,6 +2373,9 @@ sub mktPackShip {
         if (mktShipHasTransfer($s, 'transfer')) {
             print "WARNING: ship $s->{id} has unload and transfer order at the same time, transfer was ignored\n";
         }
+        print "Quapla2: ship $s->{id} unloads to #$s->{unloadid}\n";
+        my $TType;
+        if ($s->{unloadid} eq 0) { $TType = 3; } else { $TType = 1; }
         @x = (TransferNeutronium => $s->{unloadneutronium},
               TransferDuranium => $s->{unloadduranium},
               TransferTritanium => $s->{unloadtritanium},
@@ -2374,7 +2385,7 @@ sub mktPackShip {
               TransferClans => $s->{unloadclans},
               TransferAmmo => 0,
               TransferTargetId => $s->{unloadid},
-              TransferTargetType => 1);
+              TransferTargetType => $TType);
     } elsif (mktShipHasTransfer($s, 'transfer')) {
         @x = (TransferNeutronium => $s->{transferneutronium},
               TransferDuranium => $s->{transferduranium},
