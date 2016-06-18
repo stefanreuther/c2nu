@@ -1756,7 +1756,11 @@ sub rstSynthesizeMessages {
     my $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
                                     $parsedReply->{rst}{game},
                                     [name=>"Game Name: %s"], [description=>"Description: %s"], "\n", [hostdays=>"Host Days: %s"],
-                                    [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"]);
+                                    [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"], "\n");
+    $text .= "User Name: ".stateGet('user')."\n";
+    $text .= "Game Number: ".stateGet('gameid')."\n";
+    $text .= "c2nu version: $VERSION\n";
+
     # Wordwrap for VPA
     $text =~ s| *<br */?> *| |g;
     $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
