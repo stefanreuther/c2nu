@@ -97,3 +97,6 @@ Differences between Nu data model and VGA Planets
   (with limit=50 for defense, 100 for factories, 200 for mines).
   Host uses ERND, PHost uses Round, which makes no difference in
   practice. Nu uses Trunc and thus allows fewer buildings.
+  
+  Fuel-Usage: It seems that NU calculated the usage of fuel as Phost. (Nonproven, experimantal)
+  

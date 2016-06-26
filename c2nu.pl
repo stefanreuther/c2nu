@@ -90,14 +90,14 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016 Stefan Reuther with additions by Qapla
+#  (c) 2011-2012,2016 Stefan Reuther with additions by Quapla
 #
 use strict;
 use Socket;
 use IO::Handle;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.2";
+my $VERSION = "0.3.3";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -1693,6 +1693,7 @@ sub rstPackMessages {
     my $player = shift;
     my $turn = $parsedReply->{rst}{settings}{turn};
     my @result;
+    my $text;
 
     # I have not yet seen all of these.
     my @templates = (
@@ -1743,7 +1744,71 @@ sub rstPackMessages {
         }
         push @result, rstEncryptMessage($msg);
     }
+                           
+    foreach (@{$parsedReply->{rst}{ionstorms}}) {
+     
+    #    $text = rstSynthesizeMessages("(-x0000)<<< ION Advisory >>>",
+    #                                $parsedReply->{rst}{ionstorms},
+    #                                "From: Ion Weather Station",
+    #                                [id=>"Ion Disturbance #%s"], "\n",
+    #                                [x=>"Centered at: (%s"], [y=>",%s)"], "\n",
+    #                                [voltage=>"Voltage : %s"], "\n",
+    #                                [heading=>"Heading : %s"], "\n",
+    #                                [warp=>"Speed : %s"], "\n",
+    #                                [radius=>"Radius  : %s"], "\n",
+    #                                #[int(($_->{voltage} + 49)/50)radius=>"Radius  : %s"],
+    #                                [isgrowing=>"System is %s"]
+    #    );
 
+        $text = "(-i0000)<<< ION Advisory >>>\n",
+        $text .= "From: Ion Weather Bureau\n\n";
+        $text .= "Ion Disturbance #".$_->{id}."\n\n";
+        $text .= "Centered at: (".$_->{x}.", ".$_->{y}.")\n\n";
+        $text .= "Voltage : ".$_->{voltage};
+        if ($_->{voltage} > 200) { $text .= " (very dangerous)\n";}
+        elsif ($_->{voltage} > 150) { $text .= " (dangerous)\n";}
+        elsif ($_->{voltage} > 100) { $text .= " (strong)\n";}
+        elsif ($_->{voltage} > 50) { $text .= " (moderate)\n";}
+        else { $text .= " (harmless)\n";}
+        $text .= "Heading : ".$_->{heading}."\n";
+        $text .= "Speed   : Warp ".$_->{warp}."\n";
+        $text .= "Radius  : ".$_->{radius}."\n\n";
+        $text .= "System is ";
+        if ($_->{isgrowing} == 0) {
+            $text .= "growing\n";
+            } else {
+            $text .= "weakening\n";
+            }
+            
+        push @result, rstEncryptMessage($text); 
+        #print $text;
+    }
+
+    # Minefields
+    foreach (@{$parsedReply->{rst}{minefields}}) {
+        $text = "(-m0000)<<< Minefield Advisory >>>\n",
+        $text .= "From: Intelligence Bureau\n\n";
+		$text .= "Turn: ".$_->{infoturn};
+
+		if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
+			$text .= " (current)\n\n"; } else {
+			$text .= " (".($parsedReply->{rst}{settings}{turn}-$_->{infoturn})." turns ago)\n\n"; }
+			#$text .= " (".($_->{infoturn}." turns ago)\n\n"; }
+		
+        # ignored fields: friendlycode, radius
+		$text .= "ID    : ".$_->{id}."\n";
+		$text .= "At    : (".$_->{x}.", ".$_->{y}.")\n";
+		$text .= "Owner : ".rstMapOwnerToRace($parsedReply, $_->{ownerid})."\n";
+		$text .= "Units : ".$_->{units}." ";
+		if ($_->{isweb}) {
+			$text .= "web"; }
+		$text .= "mines\n";
+		$text .= "Radius: ".$_->{radius}."\n";
+		$text .= "FC    : ".$_->{friendlycode}."\n";
+    
+		push @result, rstEncryptMessage($text); 
+    }
+    
     @result;
 }
 
@@ -1751,23 +1816,29 @@ sub rstSynthesizeMessages {
     my $parsedReply = shift;
     my $player = shift;
     my @result;
+    my $text;
 
     # Settings I (from 'game')
-    my $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
+    $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
                                     $parsedReply->{rst}{game},
-                                    [name=>"Game Name: %s"], [description=>"Description: %s"], "\n", [hostdays=>"Host Days: %s"],
-                                    [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"], "\n");
-    $text .= "User Name: ".stateGet('user')."\n";
-    $text .= "Game Number: ".stateGet('gameid')."\n";
-    $text .= "c2nu version: $VERSION\n";
-
+                                    [name=>"Game Name: %s"], [description=>"Description: %s"]);
     # Wordwrap for VPA
     $text =~ s| *<br */?> *| |g;
     $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     push @result, rstEncryptMessage($text) if defined($text);
 
-    # Settings II (from 'settings')
+    # Settings II (from 'game' and NU-Infos)
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (2) >>>",
+                                    $parsedReply->{rst}{game},
+                                    [hostdays=>"Host Days: %s"],
+                                    [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"], "\n");
+    $text .= "User Name: ".stateGet('user')."\n";
+    $text .= "Game Number: ".stateGet('gameid')."\n";
+    $text .= "c2nu version: $VERSION\n";
+    push @result, rstEncryptMessage($text) if defined($text);
+    
+    # Settings III (from 'settings')
+    $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (3) >>>",
                                  $parsedReply->{rst}{settings},
                                  [buildqueueplanetid => "Build Queue Planet: %s"],
                                  [turn               => "Turn %s"],
@@ -1955,6 +2026,7 @@ sub rstFormatMessage {
     $text =~ s|[\s\r\n]+| |g;
     $text =~ s| *<br */?> *|\n|g;
     $text =~ s| ID#|\nID#|g;
+	$text =~ s|\. |\.\n|g;
     $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     $text;
 }
@@ -2377,7 +2449,7 @@ sub mktPackShip {
         if (mktShipHasTransfer($s, 'transfer')) {
             print "WARNING: ship $s->{id} has unload and transfer order at the same time, transfer was ignored\n";
         }
-        print "Quapla2: ship $s->{id} unloads to #$s->{unloadid}\n";
+        #print "Quapla2: ship $s->{id} unloads to #$s->{unloadid}\n";
         my $TType;
         if ($s->{unloadid} eq 0) { $TType = 3; } else { $TType = 1; }
         @x = (TransferNeutronium => $s->{unloadneutronium},
