@@ -97,7 +97,7 @@ use Socket;
 use IO::Handle;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.3";
+my $VERSION = "0.3.4";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -1265,6 +1265,14 @@ sub unpPackShips {
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
                                          transfertargetid));
+            } elsif ($ship->{transfertargettype} == 3) {
+            # Jettison
+                $dat .= rstPackFieldsJet($ship,
+                                      "v7",
+                                      qw(transferneutronium transfertritanium
+                                         transferduranium transfermolybdenum
+                                         transferclans transfersupplies));
+                 print "WARNING: Jettison experimantal\n";
             } else {
                 $dat .= "\0" x 14;
             }
@@ -1276,15 +1284,16 @@ sub unpPackShips {
                                       qw(transferneutronium transfertritanium
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
-                                         transfertargetid));
+                                         transfertargetid));            
             } else {
                 $dat .= "\0" x 14;
             }
             $dis .= "\0" x 14;
 
-            if ($ship->{transfertargettype} == 3) {
-                print "WARNING: Jettison not implemented yet\n";
-            }
+            #if ($ship->{transfertargettype} == 3) {
+            #    print "WARNING: Jettison not implemented yet\n";
+            #}
+
             if ($ship->{transfermegacredits} || $ship->{transferammo}) {
                 print "WARNING: transfer of mc and/or ammo not implemented yet\n";
             }
@@ -1747,7 +1756,7 @@ sub rstPackMessages {
                            
     foreach (@{$parsedReply->{rst}{ionstorms}}) {
      
-    #    $text = rstSynthesizeMessages("(-x0000)<<< ION Advisory >>>",
+    #    $text = rstSynthesizeMessage("(-x0000)<<< ION Advisory >>>",
     #                                $parsedReply->{rst}{ionstorms},
     #                                "From: Ion Weather Station",
     #                                [id=>"Ion Disturbance #%s"], "\n",
@@ -1824,7 +1833,7 @@ sub rstSynthesizeMessages {
                                     [name=>"Game Name: %s"], [description=>"Description: %s"]);
     # Wordwrap for VPA
     $text =~ s| *<br */?> *| |g;
-    $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
+    $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     push @result, rstEncryptMessage($text) if defined($text);
 
     # Settings II (from 'game' and NU-Infos)
@@ -2027,7 +2036,7 @@ sub rstFormatMessage {
     $text =~ s| *<br */?> *|\n|g;
     $text =~ s| ID#|\nID#|g;
 	$text =~ s|\. |\.\n|g;
-    $text =~ s/(?=.{38,})(.{0,38}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
+    $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     $text;
 }
 
@@ -2052,6 +2061,17 @@ sub rstPackFields {
     foreach my $field (@_) {
         push @fields, $hash->{$field};
     }
+    pack($pack, @fields);
+}
+
+sub rstPackFieldsJet {
+    my $hash = shift;
+    my $pack = shift;
+    my @fields;
+    foreach my $field (@_) {
+        push @fields, $hash->{$field};
+    }
+	push @fields, 0;
     pack($pack, @fields);
 }
 
