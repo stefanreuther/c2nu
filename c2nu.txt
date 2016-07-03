@@ -99,4 +99,3 @@ Differences between Nu data model and VGA Planets
   practice. Nu uses Trunc and thus allows fewer buildings.
 
   Fuel-Usage: It seems that NU calculated the usage of fuel as Phost. (Nonproven, experimantal)
-

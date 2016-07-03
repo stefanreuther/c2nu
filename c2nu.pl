@@ -1284,7 +1284,7 @@ sub unpPackShips {
                                       qw(transferneutronium transfertritanium
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
-                                         transfertargetid));            
+                                         transfertargetid));
             } else {
                 $dat .= "\0" x 14;
             }
@@ -1524,6 +1524,7 @@ sub rstMakeTimeStamp {
 }
 
 sub rstWriteHeader {
+    #offsets[8] = Winplandata
     my @offsets = @_;
     seek RST, 0, 0;
     print RST pack("V8", @offsets[0 .. 7]), "VER3.501", pack("V3", $offsets[8], 0, $offsets[9]);
@@ -1569,6 +1570,13 @@ sub rstPackShips {
                                        transferduranium transfermolybdenum
                                        transferclans transfersupplies
                                        transfertargetid));
+            } elsif ($ship->{transfertargettype} == 3) {
+                            # Unload
+                $p .= rstPackFieldsJet($ship,
+                                    "v7",
+                                    qw(transferneutronium transfertritanium
+                                       transferduranium transfermolybdenum
+                                       transferclans transfersupplies));
             } else {
                 $p .= "\0" x 14;
             }
@@ -1753,8 +1761,6 @@ sub rstPackMessages {
         }
         push @result, rstEncryptMessage($msg);
     }
-                           
-    foreach (@{$parsedReply->{rst}{ionstorms}}) {
 
     foreach (@{$parsedReply->{rst}{ionstorms}}) {
         $text = "(-i0000)<<< ION Advisory >>>\n",
