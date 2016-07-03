@@ -1744,22 +1744,8 @@ sub rstPackMessages {
         }
         push @result, rstEncryptMessage($msg);
     }
-                           
-    foreach (@{$parsedReply->{rst}{ionstorms}}) {
-     
-    #    $text = rstSynthesizeMessages("(-x0000)<<< ION Advisory >>>",
-    #                                $parsedReply->{rst}{ionstorms},
-    #                                "From: Ion Weather Station",
-    #                                [id=>"Ion Disturbance #%s"], "\n",
-    #                                [x=>"Centered at: (%s"], [y=>",%s)"], "\n",
-    #                                [voltage=>"Voltage : %s"], "\n",
-    #                                [heading=>"Heading : %s"], "\n",
-    #                                [warp=>"Speed : %s"], "\n",
-    #                                [radius=>"Radius  : %s"], "\n",
-    #                                #[int(($_->{voltage} + 49)/50)radius=>"Radius  : %s"],
-    #                                [isgrowing=>"System is %s"]
-    #    );
 
+    foreach (@{$parsedReply->{rst}{ionstorms}}) {
         $text = "(-i0000)<<< ION Advisory >>>\n",
         $text .= "From: Ion Weather Bureau\n\n";
         $text .= "Ion Disturbance #".$_->{id}."\n\n";
@@ -1779,36 +1765,38 @@ sub rstPackMessages {
             } else {
             $text .= "weakening\n";
             }
-            
-        push @result, rstEncryptMessage($text); 
-        #print $text;
+
+        push @result, rstEncryptMessage($text);
     }
 
     # Minefields
     foreach (@{$parsedReply->{rst}{minefields}}) {
         $text = "(-m0000)<<< Minefield Advisory >>>\n",
         $text .= "From: Intelligence Bureau\n\n";
-		$text .= "Turn: ".$_->{infoturn};
+        $text .= "Turn: ".$_->{infoturn};
 
-		if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
-			$text .= " (current)\n\n"; } else {
-			$text .= " (".($parsedReply->{rst}{settings}{turn}-$_->{infoturn})." turns ago)\n\n"; }
-			#$text .= " (".($_->{infoturn}." turns ago)\n\n"; }
-		
+        if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
+            $text .= " (current)\n\n";
+        } else {
+            $text .= " (".($parsedReply->{rst}{settings}{turn}-$_->{infoturn})." turns ago)\n\n";
+        }
+        #$text .= " (".($_->{infoturn}." turns ago)\n\n"; }
+
         # ignored fields: friendlycode, radius
-		$text .= "ID    : ".$_->{id}."\n";
-		$text .= "At    : (".$_->{x}.", ".$_->{y}.")\n";
-		$text .= "Owner : ".rstMapOwnerToRace($parsedReply, $_->{ownerid})."\n";
-		$text .= "Units : ".$_->{units}." ";
-		if ($_->{isweb}) {
-			$text .= "web"; }
-		$text .= "mines\n";
-		$text .= "Radius: ".$_->{radius}."\n";
-		$text .= "FC    : ".$_->{friendlycode}."\n";
-    
-		push @result, rstEncryptMessage($text); 
+        $text .= "ID    : ".$_->{id}."\n";
+        $text .= "At    : (".$_->{x}.", ".$_->{y}.")\n";
+        $text .= "Owner : ".rstMapOwnerToRace($parsedReply, $_->{ownerid})."\n";
+        $text .= "Units : ".$_->{units}." ";
+        if ($_->{isweb}) {
+            $text .= "web";
+        }
+        $text .= "mines\n";
+        $text .= "Radius: ".$_->{radius}."\n";
+        $text .= "FC    : ".$_->{friendlycode}."\n";
+
+        push @result, rstEncryptMessage($text);
     }
-    
+
     @result;
 }
 
@@ -1836,7 +1824,7 @@ sub rstSynthesizeMessages {
     $text .= "Game Number: ".stateGet('gameid')."\n";
     $text .= "c2nu version: $VERSION\n";
     push @result, rstEncryptMessage($text) if defined($text);
-    
+
     # Settings III (from 'settings')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (3) >>>",
                                  $parsedReply->{rst}{settings},
