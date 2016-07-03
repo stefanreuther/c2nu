@@ -620,6 +620,10 @@ sub makeResult {
     $offsets[7] = tell(RST)+1;
     print RST $vcrs;
 
+    my $winplandata = rstPackWinplan($parsedReply);
+    $offsets[8] = tell(RST)+1;
+    print RST $winplandata;
+    
     # Finish
     rstWriteHeader(@offsets);
     close RST;
@@ -1999,6 +2003,98 @@ sub rstPackVcrs {
     }
     pack("v", scalar(@vcrs)) . join("", @vcrs);
 }
+
+sub rstPackWinplan {
+    my $parsedReply = shift;
+    my @winplan;
+    my $text;
+    my $count;
+    
+    #Winplan data
+    #+0 500 RECORDs of 8 bytes each; Mine fields
+    #             +0     WORD    X
+    #             +2     WORD    Y
+    #             +4     WORD    Radius. Zero if the minefield has been
+    #                            swept. All other information remains in
+    #                            this minefield slot until the slot is
+    #                            re-used for a new minefield.
+    #             +6     WORD    Owner.
+    #                             0      empty record
+    #                             1..11  Normal minefield belonging to
+    #                                    race 1..11
+    #                             12     Crystalline Web mine field.
+    #                            Note that this does not allow transmission
+    #                            of web minefields that do not belong to the
+    #                            Crystals. Non-Crystalline webs are sent as
+    #                            normal mines (1..11).
+    $count = 0;
+    foreach (@{$parsedReply->{rst}{minefields}}) {
+        push @winplan, pack('vvv', $_->{x}, $_->{y}, $_->{radius});
+        if ($_->{isweb}) {
+			push @winplan,pack('v', 12); }
+        else {
+            push @winplan, pack('v', $_->{ownerid});}
+        ++$count;
+        print "Writing Minefield #", $count," ... \n";
+    }
+    print "Writing ",(500-$count)," empty Minefields ... \n";
+    for (my $i = $count; $i < 500; ++$i) {
+        push @winplan, pack('v4',0,0,0,0); }
+    #push @winplan, pack('v*',replicate((500-$count)*4, 0));
+            
+    #+? 600 BYTEs   Ion storms, 50 records of 12 bytes each
+    #             +0     WORD    X
+    #             +2     WORD    Y. Note that THost sometimes generates
+    #                            storms with negative coordinates.
+    #             +4     WORD    Radius
+    #             +6     WORD    Voltage in MeV
+    #                             0      non-existent
+    #                             even   weakening storm
+    #                             odd    growing storm
+    #             +8     WORD    Warp
+    #            +10     WORD    Heading in degrees
+    #            see also GREY.HST below.
+    $count = 0;
+    foreach (@{$parsedReply->{rst}{ionstorms}}) {
+        push @winplan, pack('v6', $_->{x}, $_->{y}, $_->{radius}, $_->{voltage}, $_->{warp}, $_->{heading});
+        ++$count;
+        print "Writing Ionstorm #", $count, " ...\n";
+    }
+
+    print "Writing ",(50-$count)," empty Ionstorms ... \n";
+    for (my $i = $count; $i < 50; ++$i) {
+        push @winplan, pack('v6',0,0,0,0,0,0);}
+    #push @winplan, pack('v*',replicate((50-$count)*6, 0));
+ 
+    #+?  50 RECORDs of 4 bytes each: Explosions
+    #             +0     WORD    X (0 = non-existent)
+    #             +2     WORD    Y
+    for (my $i = 0; $i < 50; ++$i) {
+        push @winplan, pack('vv',0,0);}
+    #push @winplan, pack('v*',replicate(50*2, 0));
+    
+    #+? 682 BYTEs   Contents of RACE.NM. RACE.NM remains unchanged if this field is empty (only spaces).
+    for (my $i = 0; $i < 682; ++$i) {
+        push @winplan, pack('c',' ');}
+    #push @winplan, pack('A',replicate(682, ' '));
+
+    
+    #+? 7800 BYTEs  Contents of UFO.HST, filtered
+    for (my $i = 0; $i < 3900; ++$i) {
+        push @winplan, pack('v',0);}
+
+    #push @winplan, pack('v*',replicate(3900, 0));
+    
+    #+?   4 BYTEs   Signature "1211", if all visual contacts fit into the
+    #            normal TARGETx.DAT file, "1120" otherwise. These numbers
+    #            appear to be literals, not some strange flags.
+    push @winplan, pack('c4','1211');
+
+    $text = @winplan;
+    print $text, " of Winplandata: ",@winplan,"\n",unpack('v2000v300v100A682v3900A4',@winplan),"\n";
+    
+    @winplan;           
+    }
 
 sub rstWriteMessages {
     my $nmessages = @_;
