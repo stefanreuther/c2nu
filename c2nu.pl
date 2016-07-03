@@ -1524,6 +1524,7 @@ sub rstMakeTimeStamp {
 }
 
 sub rstWriteHeader {
+    #offsets[8] = Winplandata
     my @offsets = @_;
     seek RST, 0, 0;
     print RST pack("V8", @offsets[0 .. 7]), "VER3.501", pack("V3", $offsets[8], 0, $offsets[9]);
@@ -1569,7 +1570,14 @@ sub rstPackShips {
                                        transferduranium transfermolybdenum
                                        transferclans transfersupplies
                                        transfertargetid));
-            } else {
+            } elsif ($ship->{transfertargettype} == 3) { 
+                            # Unload
+                $p .= rstPackFieldsJet($ship,
+                                    "v7",
+                                    qw(transferneutronium transfertritanium
+                                       transferduranium transfermolybdenum
+                                       transferclans transfersupplies));
+            } else { 
                 $p .= "\0" x 14;
             }
             if ($ship->{transfertargettype} == 2) {
@@ -1756,19 +1764,6 @@ sub rstPackMessages {
                            
     foreach (@{$parsedReply->{rst}{ionstorms}}) {
      
-    #    $text = rstSynthesizeMessage("(-x0000)<<< ION Advisory >>>",
-    #                                $parsedReply->{rst}{ionstorms},
-    #                                "From: Ion Weather Station",
-    #                                [id=>"Ion Disturbance #%s"], "\n",
-    #                                [x=>"Centered at: (%s"], [y=>",%s)"], "\n",
-    #                                [voltage=>"Voltage : %s"], "\n",
-    #                                [heading=>"Heading : %s"], "\n",
-    #                                [warp=>"Speed : %s"], "\n",
-    #                                [radius=>"Radius  : %s"], "\n",
-    #                                #[int(($_->{voltage} + 49)/50)radius=>"Radius  : %s"],
-    #                                [isgrowing=>"System is %s"]
-    #    );
-
         $text = "(-i0000)<<< ION Advisory >>>\n",
         $text .= "From: Ion Weather Bureau\n\n";
         $text .= "Ion Disturbance #".$_->{id}."\n\n";

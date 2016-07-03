@@ -100,3 +100,5 @@ Differences between Nu data model and VGA Planets
   
   Fuel-Usage: It seems that NU calculated the usage of fuel as Phost. (Nonproven, experimantal)
   
+  Distance-Rounding: Thost uses ceiling to round upwards - up to 81.9LY are possible. Nu uses Round, so max. 81.5 LY are possible
+  
