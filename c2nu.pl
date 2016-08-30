@@ -335,40 +335,63 @@ sub doVcr {
 sub doDownloadResult {
     my $gameId;
     my $dtrn;
+    my $player;
     my $reply;
-    if (@ARGV == 0) {
+    foreach (@ARGV) {
+        if (/^--?player=(\d+)$/) {
+            $player = $1;
+        } elsif (/^--?turn=(\d+)$/) {
+            $dtrn = $1;
+        } elsif (/^--?game=(\d+)$/) {
+            $gameId = $1;
+        } elsif (/^--?help$/) {
+            print "Usage:\n";
+            print "   $0 COMMAND [GAME [TURN]]\n";
+            print "   $0 COMMAND [--game=GAME] [--turn=TURN] [--player=PLAYER]\n\n";
+            print "Given just a GAME, downloads your result for that game.\n";
+            print "Parameters allow you to get a different turn (history) or different\n";
+            print "player (for finished games).\n\n";
+            print "GAME is 'sticky' (saved in state file).\n\n";
+            print "This syntax applies to all commands that download a result file,\n";
+            print " i.e. 'rst', 'unpack', 'dump', 'vcr'. A possible '--rst' option\n";
+            print "must be specified before the command.\n";
+            exit 0;
+        } elsif (/^-/) {
+            die "rst1: unknown option '$_'\n";
+        } else {
+            if (!defined($gameId)) {
+                $gameId = $_;
+            } elsif (!defined($dtrn)) {
+                $dtrn = $_;
+            } else {
+                die "rst1: need one or two parameters, game number (+ turn number)\n";
+            }
+        }
+    }
+    if (!defined($gameId)) {
         $gameId = stateGet('gameid');
         if (!$gameId) {
-            die "rst1: need one parameter: game name\n";
+            die "rst1: need at least on parameter, game number\n";
         }
+    }
+    if (!defined($dtrn)) {
         $dtrn = 0;
-    } elsif (@ARGV == 1) {
-        $gameId = shift @ARGV;
-        $dtrn = 0;
-    } elsif (@ARGV == 2) {
-        $gameId = shift @ARGV;
-        $dtrn = shift @ARGV;
-    } else {
-        die "rst1: need one parameter: game name (+ turnnumber)\n";
     }
     stateSet('gameid', $gameId);
     stateSet('turn', $dtrn);
-    if ($dtrn != 0) {
-        print "Getting turn #", $dtrn, " ...\n";
-        $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
-                          httpBuildQuery(gameid => $gameId,
-                                         apikey => stateGet('apikey'),
-                                         forsave => "true",
-                                         activity => "true",
-                                         turn => $dtrn));
-    } else {
-        print "Getting current turnfile...\n";
-        $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
-                          httpBuildQuery(gameid => $gameId,
-                                         apikey => stateGet('apikey'),
-                                         forsave => "true",
-                                         activity => "true"));
+    my @params = (gameid => $gameId,
+                  apikey => stateGet('apikey'),
+                  forsave => "true",
+                  activity => "true");
+    if ($dtrn) {
+        push @params, turn => $dtrn;
     }
+    if (defined($player)) {
+        push @params, playerid => $player;
+    }
+
+    print "Getting result...\n";
+    $reply = httpCall("POST /game/loadturn HTTP/1.0\n", httpBuildQuery(@params));
 
     print "Saving output...\n";
     open OUT, "> $opt_rst" or die "$opt_rst: $!\n";
