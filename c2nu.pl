@@ -52,6 +52,9 @@
 #if CMD_RUNHOST
 #    runhost        Run host for a solo game you previously downloaded
 #endif
+#if CMD_SERVE
+#    serve RST...   Serve results locally (for testing c2nu/c2ng)
+#endif
 #
 #  All download commands can be split in two halves, i.e. "vcr1 [GAME]"
 #  to perform the download, and "vcr2" to convert the download without
@@ -95,9 +98,10 @@
 use strict;
 use Socket;
 use IO::Handle;
+use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.4";
+my $VERSION = "0.3.5";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -174,6 +178,10 @@ if ($cmd eq 'help') {
 } elsif ($cmd eq 'runhost') {
     doRunHost();
 #endif
+#if CMD_SERVE
+} elsif ($cmd eq 'serve') {
+    doServe();
+#endif
 } else {
     die "Invalid command '$cmd'. '$0 --help' for help\n";
 }
@@ -215,6 +223,9 @@ sub doHelp {
 #endif
 #if CMD_RUNHOST
     print "  runhost           run host for solo game\n";
+#endif
+#if CMD_SERVE
+    print "  serve RST...      serve results locally\n";
 #endif
     print "\n";
     print "Download commands can be split into the download part ('vcr1') and the\n";
@@ -1486,6 +1497,161 @@ sub rhCheckFailure {
         die "Aborted.\n";
     }
 }
+
+######################################################################
+#
+#  Serving
+#
+######################################################################
+
+sub doServe {
+    # Parse args
+    my $port = 8080;
+    my @rsts;
+    foreach (@ARGV) {
+        if (/^--?port=(\d+)$/) {
+            $port = $1;
+        } elsif (/^--?help$/) {
+            print "Usage:\n";
+            print "  $0 serve [--port=PORT] RST...\n\n";
+            print "Serves the given result files on a simple web server.\n";
+            exit 0;
+        } elsif (/^-/) {
+            die "serve: unknown option '$_'\n";
+        } else {
+            push @rsts, $_;
+        }
+    }
+
+    # Check
+    if (!@rsts) {
+        die "serve: need some result files\n";
+    }
+
+    # Load
+    my %rsts;
+    foreach (@rsts) {
+        my $data = readFile($_);
+        print "Parsing $_...\n";
+
+        # Remove manually added headers: comments, whitespace, variable declaration
+        while ($data =~ s/\A\s*\/\/[^\n]*\n//sg
+               || $data =~ s/\A\s*\n//sg
+               || $data =~ s/\Avar\s+\S+\s*=\s*//sg)
+        { }
+        
+        my $rst = jsonParse($data);
+        my $id = $rst->{rst}{game}{id};
+        if (!$id) {
+            die "$_: not a result file\n";
+        }
+        if (exists $rsts{$id}) {
+            die "$_: duplicate game identifier; cannot serve these files in one go\n";
+        }
+        $rsts{$id} = $rst;
+        print "\tGame $id: $rst->{rst}{game}{name}, turn $rst->{rst}{game}{turn}\n";
+    }
+
+    # Serve
+    my $socket = IO::Socket::INET->new(Proto => 'tcp', LocalPort => $port, Listen => 10, Reuse => 1) or die;
+    print "Serving...\n";
+    while (my $client = $socket->accept()) {
+        $client->autoflush(1);
+        while (1) {
+            # Read request
+            my ($method, $url);
+            my $line = <$client>;
+            if (defined($line) && $line =~ /^(\S+)\s*(\S+)/) {
+                $method = uc($1);
+                $url = $2;
+            } else {
+                # Unexpected connection close or syntax error
+                last;
+            }
+
+            # Parse url
+            my %params;
+            if ($url =~ s/\?(.*)//) {
+                foreach (split /&/, $1) {
+                    if (/^(.*?)=(.*)/) {
+                        $params{$1} = $2;
+                    }
+                }
+            }
+            print "$method $url\n";
+
+            # Read headers
+            my %headers = (connection=>'');
+            while (defined($line = <$client>)) {
+                $line =~ s/[\r\n]+//;
+                last if $line eq '';
+                if ($line =~ /^(.*?):\s*(.*)/) {
+                    $headers{lc($1)} = $2;
+                }
+            }
+
+            # POST content?
+            if ($headers{'content-length'}) {
+                my $tmp;
+                read $client, $tmp, $headers{'content-length'};
+                foreach (split /&/, $tmp) {
+                    if (/^(.*?)=(.*)/) {
+                        $params{$1} = $2;
+                    }
+                }
+            }
+
+            # Handle request
+            my $response = srvHandleRequest(\%rsts, $url, \%params);
+            if (defined($response)) {
+                print $client $response;
+            } else {
+                print $client "HTTP/1.0 404 Not found\r\n";
+                print $client "Content-Type: text/plain\r\n\r\n";
+                print $client "Not found: $url\r\n";
+                last;
+            }
+
+            # Enable the 'if' to activate persistent connections (disabled by default because we're single-threaded).
+            last #if lc($headers{'connection'}) eq 'close';
+        }
+        $client->close();
+    }
+    exit 0;
+}
+
+sub srvHandleRequest {
+    # Handle a single request. Returns the whole request message (or undef).
+    my ($rsts, $url, $param) = @_;
+    if ($url eq '/') {
+        return srvWrapText("\"c2nu server\"");
+    } elsif ($url eq '/account/login') {
+        return srvWrapText('{"success":true,"apikey":"1234"}');
+    } elsif ($url eq '/account/mygames') {
+        my @list;
+        foreach (sort keys %$rsts) {
+            push @list, {game => $rsts->{$_}{rst}{game},
+                         player => $rsts->{$_}{rst}{player}};
+        }
+        return srvWrapText(jsonFormat({games=>\@list}));
+    } elsif ($url eq '/game/loadturn' && exists $rsts->{$param->{gameid}}) {
+        return srvWrapText(jsonFormat($rsts->{$param->{gameid}}));
+    } else {
+        return undef;
+    }
+}
+
+sub srvWrapText {
+    # Wrap text in HTTP response
+    my $text = shift;
+    return sprintf("HTTP/1.0 200 OK\r\n".
+                   "Content-Type: application/json\r\n".
+                   "Connection: close\r\n".
+                   "Content-Length: %d\r\n\r\n".
+                   "%s",
+                   length($text), $text);
+}
+
 
 ######################################################################
 #
@@ -3146,6 +3312,32 @@ sub jsonDump {
             print $fd $tree;
         } else {
             print $fd '"', stateQuote($tree), '"';
+        }
+    }
+}
+
+sub jsonFormat {
+    my $tree = shift;
+    if (ref($tree) eq 'ARRAY') {
+        # Array.
+        if (@$tree == 0) {
+            # Empty
+            return "[]";
+        } else {
+            # Full form
+            return "[" . join(',', map{jsonFormat($_)} @$tree) . "]";
+        }
+    } elsif (ref($tree) eq 'HASH') {
+        # Hash
+        return "{" . join(',', map{'"'.stateQuote($_).'":'.jsonFormat($tree->{$_})} sort keys %$tree) . "}";
+    } else {
+        # scalar
+        if (!defined($tree)) {
+            return "null";
+        } elsif ($tree =~ /^-?\d+$/) {
+            return $tree;
+        } else {
+            return '"' . stateQuote($tree) . '"';
         }
     }
 }
