@@ -3156,6 +3156,10 @@ sub httpCall {
     # Prepare
     my ($head, $body) = @_;
     my $host = stateGet('api');
+    my $port = 80;
+    if ($host =~ s/:(\d+)//) {
+        $port = $1;
+    }
     my $keks = stateCookies();
     $head .= "Host: $host\n";
     $head .= "Content-Length: " . length($body) . "\n";
@@ -3169,7 +3173,7 @@ sub httpCall {
     # Socket cruft
     print "Calling server...\n";
     my $ip = inet_aton($host) or die "ERROR: unable to resolve host '$host': $!\n";
-    my $paddr = sockaddr_in(80, $ip);
+    my $paddr = sockaddr_in($port, $ip);
     socket(HTTP, PF_INET, SOCK_STREAM, getprotobyname('tcp')) or die "ERROR: unable to create socket: $!\n";
     binmode HTTP;
     HTTP->autoflush(1);
