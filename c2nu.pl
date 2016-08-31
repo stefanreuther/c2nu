@@ -30,6 +30,7 @@
 #    status         Show state file content (no network access)
 #    login USER PW  Log in with user Id and password
 #    list           List games (must be logged in)
+#    info [GAME]    Information about a game
 #if CMD_RST
 #    rst [GAME [TRN]]    Download Nu RST (must be logged in). GAME is the game
 #                   number and can be omitted on second and later uses.
@@ -149,6 +150,8 @@ if ($cmd eq 'help') {
     doLogin();
 } elsif ($cmd eq 'list') {
     doList();
+} elsif ($cmd eq 'info') {
+    doInfo();
 #if CMD_RST
 } elsif ($cmd =~ /^rst([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
@@ -299,6 +302,65 @@ sub doList {
         print "++ Unable to obtain game list ++\n";
     }
 }
+
+
+######################################################################
+#
+#  Info about a game
+#
+######################################################################
+sub doInfo {
+    my $game;
+    my $dumper = \&infoShowPlayers;
+    foreach (@ARGV) {
+        if (/^\d+$/) {
+            $game = $_;
+        } elsif (/^--?raw$/) {
+            $dumper = \&infoShowRaw;
+        } elsif (/^--?help$/) {
+            print "Usage:\n";
+            print "  $0 info [GAME] [--raw]\n";
+            exit 0;
+        } else {
+            die "info: invalid parameter '$_'\n";
+        }
+    }
+    if (!$game) {
+        $game = stateGet('gameid');
+    }
+    if (!$game) {
+        die "info: need one parameter, game id\n";
+    }
+
+    print "Getting info...\n";
+    my $reply = httpCall("POST /game/loadinfo HTTP/1.0\n",
+                         httpBuildQuery(gameid => $game,
+                                        apikey => stateGet('apikey')));
+    my $parsedReply = jsonParse($reply->{BODY});
+    if (!$parsedReply->{game}) {
+        print "++ Did not get a valid result ++\n";
+    } else {
+        $dumper->($parsedReply);
+    }
+}
+
+
+sub infoShowPlayers {
+    my $p = shift;
+    print "Nr User                           Race Reg  Score Military PBPs\n";
+    print "-- ------------------------------ ---- ---  ----- -------- ----\n";
+    foreach (@{$p->{players}}) {
+        printf "%2d %-30s %4d %-3s  %5d %8d %4d\n",
+           $_->{id}, $_->{username}, $_->{raceid}, $_->{isregistered} ? 'YES' : 'no',
+           $_->{score}{capitalships}*10 + $_->{score}{freighters} + $_->{score}{planets}*10 + $_->{score}{starbases}*120, $_->{score}{militaryscore}, $_->{score}{prioritypoints};
+    }
+}
+
+sub infoShowRaw {
+    my $p = shift;
+    jsonDump(\*STDOUT, $p, "");
+}
+
 
 
 ######################################################################
