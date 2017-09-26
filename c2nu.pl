@@ -94,7 +94,7 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016 Stefan Reuther with additions by Quapla
+#  (c) 2011-2012,2016,2017 Stefan Reuther with additions by Quapla
 #
 use strict;
 use Socket;
@@ -102,7 +102,7 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.5";
+my $VERSION = "0.3.6";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -537,6 +537,7 @@ sub makeAllSpecFiles {
     # Make more spec files
     makeHullfuncFile($parsedReply->{rst}{hulls});
     makeTruehullFile($parsedReply->{rst}{racehulls}, $parsedReply->{rst}{player}{raceid});
+    makeRaceNameFile($parsedReply->{rst}{races});
 }
 
 # Make specification file from data received within nu RST
@@ -655,6 +656,29 @@ sub makeTruehullFile {
     binmode TH;
     print TH pack("v*", @truehull);
     close TH;
+}
+
+sub makeRaceNameFile {
+    my $pRaces = shift;
+
+    print "Making race.nm...\n";
+
+    # Build the file
+    my $full = '';
+    my $short = '';
+    my $adj = '';
+    foreach (1 .. 11) {
+        my $e = asearch($pRaces, 'id', $_, {});
+        $full  .= pack("A30", utf8ToLatin1($e->{name}      || "Player $e"));
+        $short .= pack("A20", utf8ToLatin1($e->{shortname} || "Player $e"));
+        $adj   .= pack("A12", utf8ToLatin1($e->{adjective} || "Player $e"));
+    }
+
+    # Write
+    open(RN, "> race.nm") or die "race.nm: $!\n";
+    binmode RN;
+    print RN $full, $short, $adj;
+    close RN;
 }
 
 sub makeResult {
