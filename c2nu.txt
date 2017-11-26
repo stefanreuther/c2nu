@@ -16,7 +16,7 @@ Differences between Nu data model and VGA Planets
   truehull.dat is not transmitted; instead, "racehulls" contains only
   this player's hulls.
 
-  Players are numbered from 1, and owners are given as player Ids. 
+  Players are numbered from 1, and owners are given as player Ids.
   Each player maps to a race. It is unclear how an "all-Feds" game
   would work as they would all map to the same race and thus the same
   name.
@@ -97,8 +97,5 @@ Differences between Nu data model and VGA Planets
   (with limit=50 for defense, 100 for factories, 200 for mines).
   Host uses ERND, PHost uses Round, which makes no difference in
   practice. Nu uses Trunc and thus allows fewer buildings.
-  
+
   Fuel-Usage: It seems that NU calculated the usage of fuel as Phost. (Nonproven, experimantal)
-  
-  Distance-Rounding: Thost uses ceiling to round upwards - up to 81.9LY are possible. Nu uses Round, so max. 81.5 LY are possible
-  

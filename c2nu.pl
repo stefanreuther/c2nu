@@ -30,6 +30,7 @@
 #    status         Show state file content (no network access)
 #    login USER PW  Log in with user Id and password
 #    list           List games (must be logged in)
+#    info [GAME]    Information about a game
 #if CMD_RST
 #    rst [GAME [TRN]]    Download Nu RST (must be logged in). GAME is the game
 #                   number and can be omitted on second and later uses.
@@ -51,6 +52,9 @@
 #endif
 #if CMD_RUNHOST
 #    runhost        Run host for a solo game you previously downloaded
+#endif
+#if CMD_SERVE
+#    serve RST...   Serve results locally (for testing c2nu/c2ng)
 #endif
 #
 #  All download commands can be split in two halves, i.e. "vcr1 [GAME]"
@@ -90,14 +94,15 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016 Stefan Reuther with additions by Quapla
+#  (c) 2011-2012,2016,2017 Stefan Reuther with additions by Quapla
 #
 use strict;
 use Socket;
 use IO::Handle;
+use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.5";
+my $VERSION = "0.3.6";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -145,6 +150,8 @@ if ($cmd eq 'help') {
     doLogin();
 } elsif ($cmd eq 'list') {
     doList();
+} elsif ($cmd eq 'info') {
+    doInfo();
 #if CMD_RST
 } elsif ($cmd =~ /^rst([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
@@ -173,6 +180,10 @@ if ($cmd eq 'help') {
 #if CMD_RUNHOST
 } elsif ($cmd eq 'runhost') {
     doRunHost();
+#endif
+#if CMD_SERVE
+} elsif ($cmd eq 'serve') {
+    doServe();
 #endif
 } else {
     die "Invalid command '$cmd'. '$0 --help' for help\n";
@@ -215,6 +226,9 @@ sub doHelp {
 #endif
 #if CMD_RUNHOST
     print "  runhost           run host for solo game\n";
+#endif
+#if CMD_SERVE
+    print "  serve RST...      serve results locally\n";
 #endif
     print "\n";
     print "Download commands can be split into the download part ('vcr1') and the\n";
@@ -292,6 +306,65 @@ sub doList {
 
 ######################################################################
 #
+#  Info about a game
+#
+######################################################################
+sub doInfo {
+    my $game;
+    my $dumper = \&infoShowPlayers;
+    foreach (@ARGV) {
+        if (/^\d+$/) {
+            $game = $_;
+        } elsif (/^--?raw$/) {
+            $dumper = \&infoShowRaw;
+        } elsif (/^--?help$/) {
+            print "Usage:\n";
+            print "  $0 info [GAME] [--raw]\n";
+            exit 0;
+        } else {
+            die "info: invalid parameter '$_'\n";
+        }
+    }
+    if (!$game) {
+        $game = stateGet('gameid');
+    }
+    if (!$game) {
+        die "info: need one parameter, game id\n";
+    }
+
+    print "Getting info...\n";
+    my $reply = httpCall("POST /game/loadinfo HTTP/1.0\n",
+                         httpBuildQuery(gameid => $game,
+                                        apikey => stateGet('apikey')));
+    my $parsedReply = jsonParse($reply->{BODY});
+    if (!$parsedReply->{game}) {
+        print "++ Did not get a valid result ++\n";
+    } else {
+        $dumper->($parsedReply);
+    }
+}
+
+
+sub infoShowPlayers {
+    my $p = shift;
+    print "Nr User                           Race Reg  Score Military PBPs\n";
+    print "-- ------------------------------ ---- ---  ----- -------- ----\n";
+    foreach (@{$p->{players}}) {
+        printf "%2d %-30s %4d %-3s  %5d %8d %4d\n",
+           $_->{id}, $_->{username}, $_->{raceid}, $_->{isregistered} ? 'YES' : 'no',
+           $_->{score}{capitalships}*10 + $_->{score}{freighters} + $_->{score}{planets}*10 + $_->{score}{starbases}*120, $_->{score}{militaryscore}, $_->{score}{prioritypoints};
+    }
+}
+
+sub infoShowRaw {
+    my $p = shift;
+    jsonDump(\*STDOUT, $p, "");
+}
+
+
+
+######################################################################
+#
 #  VCR file
 #
 ######################################################################
@@ -335,40 +408,63 @@ sub doVcr {
 sub doDownloadResult {
     my $gameId;
     my $dtrn;
+    my $player;
     my $reply;
-    if (@ARGV == 0) {
+    foreach (@ARGV) {
+        if (/^--?player=(\d+)$/) {
+            $player = $1;
+        } elsif (/^--?turn=(\d+)$/) {
+            $dtrn = $1;
+        } elsif (/^--?game=(\d+)$/) {
+            $gameId = $1;
+        } elsif (/^--?help$/) {
+            print "Usage:\n";
+            print "   $0 COMMAND [GAME [TURN]]\n";
+            print "   $0 COMMAND [--game=GAME] [--turn=TURN] [--player=PLAYER]\n\n";
+            print "Given just a GAME, downloads your result for that game.\n";
+            print "Parameters allow you to get a different turn (history) or different\n";
+            print "player (for finished games).\n\n";
+            print "GAME is 'sticky' (saved in state file).\n\n";
+            print "This syntax applies to all commands that download a result file,\n";
+            print " i.e. 'rst', 'unpack', 'dump', 'vcr'. A possible '--rst' option\n";
+            print "must be specified before the command.\n";
+            exit 0;
+        } elsif (/^-/) {
+            die "rst1: unknown option '$_'\n";
+        } else {
+            if (!defined($gameId)) {
+                $gameId = $_;
+            } elsif (!defined($dtrn)) {
+                $dtrn = $_;
+            } else {
+                die "rst1: need one or two parameters, game number (+ turn number)\n";
+            }
+        }
+    }
+    if (!defined($gameId)) {
         $gameId = stateGet('gameid');
         if (!$gameId) {
-            die "rst1: need one parameter: game name\n";
+            die "rst1: need at least on parameter, game number\n";
         }
+    }
+    if (!defined($dtrn)) {
         $dtrn = 0;
-    } elsif (@ARGV == 1) {
-        $gameId = shift @ARGV;
-        $dtrn = 0;
-    } elsif (@ARGV == 2) {
-        $gameId = shift @ARGV;
-        $dtrn = shift @ARGV;
-    } else {
-        die "rst1: need one parameter: game name (+ turnnumber)\n";
     }
     stateSet('gameid', $gameId);
     stateSet('turn', $dtrn);
-    if ($dtrn != 0) {
-        print "Getting turn #", $dtrn, " ...\n";
-        $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
-                          httpBuildQuery(gameid => $gameId,
-                                         apikey => stateGet('apikey'),
-                                         forsave => "true",
-                                         activity => "true",
-                                         turn => $dtrn));
-    } else {
-        print "Getting current turnfile...\n";
-        $reply = httpCall("POST /game/loadturn HTTP/1.0\n",
-                          httpBuildQuery(gameid => $gameId,
-                                         apikey => stateGet('apikey'),
-                                         forsave => "true",
-                                         activity => "true"));
+    my @params = (gameid => $gameId,
+                  apikey => stateGet('apikey'),
+                  forsave => "true",
+                  activity => "true");
+    if ($dtrn) {
+        push @params, turn => $dtrn;
     }
+    if (defined($player)) {
+        push @params, playerid => $player;
+    }
+
+    print "Getting result...\n";
+    $reply = httpCall("POST /game/loadturn HTTP/1.0\n", httpBuildQuery(@params));
 
     print "Saving output...\n";
     open OUT, "> $opt_rst" or die "$opt_rst: $!\n";
@@ -441,6 +537,7 @@ sub makeAllSpecFiles {
     # Make more spec files
     makeHullfuncFile($parsedReply->{rst}{hulls});
     makeTruehullFile($parsedReply->{rst}{racehulls}, $parsedReply->{rst}{player}{raceid});
+    makeRaceNameFile($parsedReply->{rst}{races});
 }
 
 # Make specification file from data received within nu RST
@@ -561,6 +658,29 @@ sub makeTruehullFile {
     close TH;
 }
 
+sub makeRaceNameFile {
+    my $pRaces = shift;
+
+    print "Making race.nm...\n";
+
+    # Build the file
+    my $full = '';
+    my $short = '';
+    my $adj = '';
+    foreach (1 .. 11) {
+        my $e = asearch($pRaces, 'id', $_, {});
+        $full  .= pack("A30", utf8ToLatin1($e->{name}      || "Player $e"));
+        $short .= pack("A20", utf8ToLatin1($e->{shortname} || "Player $e"));
+        $adj   .= pack("A12", utf8ToLatin1($e->{adjective} || "Player $e"));
+    }
+
+    # Write
+    open(RN, "> race.nm") or die "race.nm: $!\n";
+    binmode RN;
+    print RN $full, $short, $adj;
+    close RN;
+}
+
 sub makeResult {
     my $parsedReply = shift;
     my $player = shift;
@@ -620,10 +740,6 @@ sub makeResult {
     $offsets[7] = tell(RST)+1;
     print RST $vcrs;
 
-    my $winplandata = rstPackWinplan($parsedReply);
-    $offsets[8] = tell(RST)+1;
-    print RST $winplandata;
-    
     # Finish
     rstWriteHeader(@offsets);
     close RST;
@@ -742,14 +858,11 @@ sub makeDropMines {
             # Minefields. 16 bytes per block.
             for (my $pos = 0; $pos + 16 <= length($data); $pos += 16) {
                 my $id = unpack "v", substr($data, $pos, 2);
-                my $x = unpack "v", substr($data, $pos+2, 2);
-                my $y = unpack "v", substr($data, $pos+4, 2);
                 if (!exists($knownMines{$id})) {
                     # This field is known to PCC, but not to Nu, not even as an old one,
                     # so delete it. It must have nonzero coordinates to be accepted by
-                    # PCC, and zero units to be recognized as a deletion. VPA needs X/Y too.
-                    utilWrite(0, pack("vvvvVv", $id, $x, $y, 1, 0, 0));
-                    print "Delete MF: ", $id, " at (", $x, ",", $y, ")\n";
+                    # PCC, and zero units to be recognized as a deletion.
+                    utilWrite(0, pack("vvvvVv", $id, 1, 1, 1, 0, 0));
                     ++$ndelete;
                 }
             }
@@ -1273,7 +1386,7 @@ sub unpPackShips {
                                          transferclans transfersupplies
                                          transfertargetid));
             } elsif ($ship->{transfertargettype} == 3) {
-            # Jettison
+                # Jettison
                 $dat .= rstPackFieldsJet($ship,
                                       "v7",
                                       qw(transferneutronium transfertritanium
@@ -1291,7 +1404,7 @@ sub unpPackShips {
                                       qw(transferneutronium transfertritanium
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
-                                         transfertargetid));            
+                                         transfertargetid));
             } else {
                 $dat .= "\0" x 14;
             }
@@ -1473,6 +1586,161 @@ sub rhCheckFailure {
 
 ######################################################################
 #
+#  Serving
+#
+######################################################################
+
+sub doServe {
+    # Parse args
+    my $port = 8080;
+    my @rsts;
+    foreach (@ARGV) {
+        if (/^--?port=(\d+)$/) {
+            $port = $1;
+        } elsif (/^--?help$/) {
+            print "Usage:\n";
+            print "  $0 serve [--port=PORT] RST...\n\n";
+            print "Serves the given result files on a simple web server.\n";
+            exit 0;
+        } elsif (/^-/) {
+            die "serve: unknown option '$_'\n";
+        } else {
+            push @rsts, $_;
+        }
+    }
+
+    # Check
+    if (!@rsts) {
+        die "serve: need some result files\n";
+    }
+
+    # Load
+    my %rsts;
+    foreach (@rsts) {
+        my $data = readFile($_);
+        print "Parsing $_...\n";
+
+        # Remove manually added headers: comments, whitespace, variable declaration
+        while ($data =~ s/\A\s*\/\/[^\n]*\n//sg
+               || $data =~ s/\A\s*\n//sg
+               || $data =~ s/\Avar\s+\S+\s*=\s*//sg)
+        { }
+        
+        my $rst = jsonParse($data);
+        my $id = $rst->{rst}{game}{id};
+        if (!$id) {
+            die "$_: not a result file\n";
+        }
+        if (exists $rsts{$id}) {
+            die "$_: duplicate game identifier; cannot serve these files in one go\n";
+        }
+        $rsts{$id} = $rst;
+        print "\tGame $id: $rst->{rst}{game}{name}, turn $rst->{rst}{game}{turn}\n";
+    }
+
+    # Serve
+    my $socket = IO::Socket::INET->new(Proto => 'tcp', LocalPort => $port, Listen => 10, Reuse => 1) or die;
+    print "Serving...\n";
+    while (my $client = $socket->accept()) {
+        $client->autoflush(1);
+        while (1) {
+            # Read request
+            my ($method, $url);
+            my $line = <$client>;
+            if (defined($line) && $line =~ /^(\S+)\s*(\S+)/) {
+                $method = uc($1);
+                $url = $2;
+            } else {
+                # Unexpected connection close or syntax error
+                last;
+            }
+
+            # Parse url
+            my %params;
+            if ($url =~ s/\?(.*)//) {
+                foreach (split /&/, $1) {
+                    if (/^(.*?)=(.*)/) {
+                        $params{$1} = $2;
+                    }
+                }
+            }
+            print "$method $url\n";
+
+            # Read headers
+            my %headers = (connection=>'');
+            while (defined($line = <$client>)) {
+                $line =~ s/[\r\n]+//;
+                last if $line eq '';
+                if ($line =~ /^(.*?):\s*(.*)/) {
+                    $headers{lc($1)} = $2;
+                }
+            }
+
+            # POST content?
+            if ($headers{'content-length'}) {
+                my $tmp;
+                read $client, $tmp, $headers{'content-length'};
+                foreach (split /&/, $tmp) {
+                    if (/^(.*?)=(.*)/) {
+                        $params{$1} = $2;
+                    }
+                }
+            }
+
+            # Handle request
+            my $response = srvHandleRequest(\%rsts, $url, \%params);
+            if (defined($response)) {
+                print $client $response;
+            } else {
+                print $client "HTTP/1.0 404 Not found\r\n";
+                print $client "Content-Type: text/plain\r\n\r\n";
+                print $client "Not found: $url\r\n";
+                last;
+            }
+
+            # Enable the 'if' to activate persistent connections (disabled by default because we're single-threaded).
+            last #if lc($headers{'connection'}) eq 'close';
+        }
+        $client->close();
+    }
+    exit 0;
+}
+
+sub srvHandleRequest {
+    # Handle a single request. Returns the whole request message (or undef).
+    my ($rsts, $url, $param) = @_;
+    if ($url eq '/') {
+        return srvWrapText("\"c2nu server\"");
+    } elsif ($url eq '/account/login') {
+        return srvWrapText('{"success":true,"apikey":"1234"}');
+    } elsif ($url eq '/account/mygames') {
+        my @list;
+        foreach (sort keys %$rsts) {
+            push @list, {game => $rsts->{$_}{rst}{game},
+                         player => $rsts->{$_}{rst}{player}};
+        }
+        return srvWrapText(jsonFormat({games=>\@list}));
+    } elsif ($url eq '/game/loadturn' && exists $rsts->{$param->{gameid}}) {
+        return srvWrapText(jsonFormat($rsts->{$param->{gameid}}));
+    } else {
+        return undef;
+    }
+}
+
+sub srvWrapText {
+    # Wrap text in HTTP response
+    my $text = shift;
+    return sprintf("HTTP/1.0 200 OK\r\n".
+                   "Content-Type: application/json\r\n".
+                   "Connection: close\r\n".
+                   "Content-Length: %d\r\n\r\n".
+                   "%s",
+                   length($text), $text);
+}
+
+
+######################################################################
+#
 #  Dumping
 #
 ######################################################################
@@ -1534,7 +1802,7 @@ sub rstWriteHeader {
     #offsets[8] = Winplandata
     my @offsets = @_;
     seek RST, 0, 0;
-    print RST pack("V8", @offsets[0 .. 7]), "VER3.500", pack("V3", $offsets[8], 0, $offsets[9]);
+    print RST pack("V8", @offsets[0 .. 7]), "VER3.501", pack("V3", $offsets[8], 0, $offsets[9]);
 }
 
 # Create ship section. Returns whole section as a string.
@@ -1568,7 +1836,7 @@ sub rstPackShips {
                                 qw(damage crew clans name
                                    neutronium tritanium duranium molybdenum supplies));
 
-            # FIXed: jettison
+            # FIXME: jettison?
             if ($ship->{transfertargettype} == 1) {
                 # Unload
                 $p .= rstPackFields($ship,
@@ -1577,14 +1845,14 @@ sub rstPackShips {
                                        transferduranium transfermolybdenum
                                        transferclans transfersupplies
                                        transfertargetid));
-            } elsif ($ship->{transfertargettype} == 3) { 
+            } elsif ($ship->{transfertargettype} == 3) {
                             # Unload
                 $p .= rstPackFieldsJet($ship,
                                     "v7",
                                     qw(transferneutronium transfertritanium
                                        transferduranium transfermolybdenum
                                        transferclans transfersupplies));
-            } else { 
+            } else {
                 $p .= "\0" x 14;
             }
             if ($ship->{transfertargettype} == 2) {
@@ -1743,7 +2011,6 @@ sub rstPackMessages {
                      "(-m%04d)<<< Mine Scan >>>",           # 19 'Mine Scan',
                      "(-9%04d)<<< Captain's Log >>>",       # xx  20 'Dark Sense',
                      "(-9%04d)<<< Sub Space Message >>>",   # xx 21 'Hiss'
-                     "(-i%04d)<<< Ion Advisory >>>",        # 22 'Ionstorm',
                 );
 
     # Build message list
@@ -1769,10 +2036,9 @@ sub rstPackMessages {
         }
         push @result, rstEncryptMessage($msg);
     }
-                           
+
     foreach (@{$parsedReply->{rst}{ionstorms}}) {
-     
-        $text = sprintf('(-i%04d)<<< ION Advisory >>>', $_->{id}) . "\n";
+        $text = "(-i0000)<<< ION Advisory >>>\n",
         $text .= "From: Ion Weather Bureau\n\n";
         $text .= "Ion Disturbance #".$_->{id}."\n\n";
         $text .= "Centered at: (".$_->{x}.", ".$_->{y}.")\n\n";
@@ -1791,36 +2057,38 @@ sub rstPackMessages {
             } else {
             $text .= "weakening\n";
             }
-            
-        push @result, rstEncryptMessage($text); 
-        #print $text;
+
+        push @result, rstEncryptMessage($text);
     }
 
     # Minefields
     foreach (@{$parsedReply->{rst}{minefields}}) {
-        $text = sprintf('(-m%04d)<<< Minefield Advisory >>>', $_->{id}) . "\n";        
+        $text = "(-m0000)<<< Minefield Advisory >>>\n",
         $text .= "From: Intelligence Bureau\n\n";
-		$text .= "Turn: ".$_->{infoturn};
+        $text .= "Turn: ".$_->{infoturn};
 
-		if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
-			$text .= " (current)\n\n"; } else {
-			$text .= " (".($parsedReply->{rst}{settings}{turn}-$_->{infoturn})." turns ago)\n\n"; }
-			#$text .= " (".($_->{infoturn}." turns ago)\n\n"; }
-		
+        if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
+            $text .= " (current)\n\n";
+        } else {
+            $text .= " (".($parsedReply->{rst}{settings}{turn}-$_->{infoturn})." turns ago)\n\n";
+        }
+        #$text .= " (".($_->{infoturn}." turns ago)\n\n"; }
+
         # ignored fields: friendlycode, radius
-		$text .= "ID    : ".$_->{id}."\n";
-		$text .= "At    : (".$_->{x}.", ".$_->{y}.")\n";
-		$text .= "Owner : ".rstMapOwnerToRace($parsedReply, $_->{ownerid})."\n";
-		$text .= "Units : ".$_->{units}." ";
-		if ($_->{isweb}) {
-			$text .= "web"; }
-		$text .= "mines\n";
-		$text .= "Radius: ".$_->{radius}."\n";
-		$text .= "FC    : ".$_->{friendlycode}."\n";
-    
-		push @result, rstEncryptMessage($text); 
+        $text .= "ID    : ".$_->{id}."\n";
+        $text .= "At    : (".$_->{x}.", ".$_->{y}.")\n";
+        $text .= "Owner : ".rstMapOwnerToRace($parsedReply, $_->{ownerid})."\n";
+        $text .= "Units : ".$_->{units}." ";
+        if ($_->{isweb}) {
+            $text .= "web";
+        }
+        $text .= "mines\n";
+        $text .= "Radius: ".$_->{radius}."\n";
+        $text .= "FC    : ".$_->{friendlycode}."\n";
+
+        push @result, rstEncryptMessage($text);
     }
-    
+
     @result;
 }
 
@@ -1848,7 +2116,7 @@ sub rstSynthesizeMessages {
     $text .= "Game Number: ".stateGet('gameid')."\n";
     $text .= "c2nu version: $VERSION\n";
     push @result, rstEncryptMessage($text) if defined($text);
-    
+
     # Settings III (from 'settings')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (3) >>>",
                                  $parsedReply->{rst}{settings},
@@ -2008,68 +2276,6 @@ sub rstPackVcrs {
     pack("v", scalar(@vcrs)) . join("", @vcrs);
 }
 
-sub rstPackWinplan {
-    my $parsedReply = shift;
-    my @winplan;
-    my $wp;
-    
-    my $turn = $parsedReply->{rst}{settings}{turn};
-    
-    $wp = "";
-    foreach (1 .. 500) {
-        my $mf = asearch($parsedReply->{rst}{minefields}, 'id', $_,
-                         {x=>0,y=>0,isweb=>0,radius=>0,ownerid=>0});
-        $wp .= pack('v*', $mf->{x}, $mf->{y}, $mf->{radius},
-                          $mf->{isweb} ? 12 : rstMapOwnerToRace($parsedReply, $mf->{ownerid}));
-        #print "ID: $_ ($mf->{x},$mf->{y}) R: $mf->{radius} O: $mf->{ownerid}\n" ;
-        #$wp .= pack('v*', 0, 0, 10, 0);
-    }
-    print "Writing 500 Minefields ... \n";
-    
-    foreach (1 .. 50) {
-        my $mf = asearch($parsedReply->{rst}{ionstorms},
-                         'id', $_,
-                         {x=>0,y=>0,radius=>0,voltage=>0,warp=>0,heading=>0});
-        $wp .= pack('v*', $mf->{x}, $mf->{y}, $mf->{radius},
-                            $mf->{voltage}, $mf->{warp}, $mf->{heading});
-        #if ($mf->{x} > 0) {print "ID: $_ ($mf->{x},$mf->{y}) R: $mf->{radius} V: $mf->{voltage} W: $mf->{warp} H: $mf->{heading}\n" ;}
-    }
-    print "Writing 50 Ionstorms ... \n";                    
-    
-    #+?  50 RECORDs of 4 bytes each: Explosions
-    #             +0     WORD    X (0 = non-existent)
-    #             +2     WORD    Y
-    for (my $i = 0; $i < 50; ++$i) {
-        $wp .= pack('vv',0,0);}
-    #push @winplan, pack('v*',replicate(50*2, 0));
-    print "Writing 50 empty Explosions ... \n";
-    
-    #+? 682 BYTEs   Contents of RACE.NM. RACE.NM remains unchanged if this field is empty (only spaces).
-    for (my $i = 0; $i < 682; ++$i) {
-#        $wp .= ' ';
-         $wp .= pack('c', 0);
-    }
-    print "Writing 682 bytes empty Race.nm ... \n";
-    
-    #+? 7800 BYTEs  Contents of UFO.HST, filtered
-    for (my $i = 0; $i < 3900; ++$i) {
-        $wp .= pack('v',0);
-    }
-    print "Writing 7800 Bytes empty Ufo.hst ... \n";
-    #push @winplan, pack('v*',replicate(3900, 0));
-    
-    #+?   4 BYTEs   Signature "1211", if all visual contacts fit into the
-    #            normal TARGETx.DAT file, "1120" otherwise. These numbers
-    #            appear to be literals, not some strange flags.
-    $wp .= '1211';
-    print "Writing 1211 (+4 bytes) ... \n";
-    
-    push @winplan, $wp;
-    #print 0+@winplan, " of Winplandata: winplan\n",unpack('v2000v300v100A682v3900A4',$wp),"\n";
-    
-    return($wp);           
-    }
-
 sub rstWriteMessages {
     my $nmessages = @_;
 
@@ -2100,7 +2306,7 @@ sub rstFormatMessage {
     $text =~ s|[\s\r\n]+| |g;
     $text =~ s| *<br */?> *|\n|g;
     $text =~ s| ID#|\nID#|g;
-	$text =~ s|\. |\.\n|g;
+    $text =~ s|\. |\.\n|g;
     $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     $text;
 }
@@ -2136,7 +2342,7 @@ sub rstPackFieldsJet {
     foreach my $field (@_) {
         push @fields, $hash->{$field};
     }
-	push @fields, 0;
+    push @fields, 0;
     pack($pack, @fields);
 }
 
@@ -2974,6 +3180,10 @@ sub httpCall {
     # Prepare
     my ($head, $body) = @_;
     my $host = stateGet('api');
+    my $port = 80;
+    if ($host =~ s/:(\d+)//) {
+        $port = $1;
+    }
     my $keks = stateCookies();
     $head .= "Host: $host\n";
     $head .= "Content-Length: " . length($body) . "\n";
@@ -2987,7 +3197,7 @@ sub httpCall {
     # Socket cruft
     print "Calling server...\n";
     my $ip = inet_aton($host) or die "ERROR: unable to resolve host '$host': $!\n";
-    my $paddr = sockaddr_in(80, $ip);
+    my $paddr = sockaddr_in($port, $ip);
     socket(HTTP, PF_INET, SOCK_STREAM, getprotobyname('tcp')) or die "ERROR: unable to create socket: $!\n";
     binmode HTTP;
     HTTP->autoflush(1);
@@ -3192,6 +3402,32 @@ sub jsonDump {
             print $fd $tree;
         } else {
             print $fd '"', stateQuote($tree), '"';
+        }
+    }
+}
+
+sub jsonFormat {
+    my $tree = shift;
+    if (ref($tree) eq 'ARRAY') {
+        # Array.
+        if (@$tree == 0) {
+            # Empty
+            return "[]";
+        } else {
+            # Full form
+            return "[" . join(',', map{jsonFormat($_)} @$tree) . "]";
+        }
+    } elsif (ref($tree) eq 'HASH') {
+        # Hash
+        return "{" . join(',', map{'"'.stateQuote($_).'":'.jsonFormat($tree->{$_})} sort keys %$tree) . "}";
+    } else {
+        # scalar
+        if (!defined($tree)) {
+            return "null";
+        } elsif ($tree =~ /^-?\d+$/) {
+            return $tree;
+        } else {
+            return '"' . stateQuote($tree) . '"';
         }
     }
 }
