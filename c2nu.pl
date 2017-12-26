@@ -102,7 +102,7 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.6";
+my $VERSION = "0.3.7";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -207,6 +207,7 @@ sub doHelp {
     print "Commands:\n";
     print "  help              this help screen\n";
     print "  status            show status\n";
+    print "  info              info about a game\n";
     print "  login USER PASS   log in\n";
     print "  list              list games\n";
 #if CMD_RST
@@ -2138,8 +2139,11 @@ sub rstSynthesizeMessages {
                                  "\n",
                                  [mapwidth           => "Map width              %s"],
                                  [mapheight          => "Map height             %s"],
+                                 [sphere             => "Wrap                   %s"],
+                                 "\n",
                                  [maxallies          => "Maximum allies         %s"],
                                  [numplanets         => "Number of planets      %s"],
+                                 [shiplimit          => "Max number of ships    %s"],
                                  [planetscanrange    => "Planets are visible at %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
 
