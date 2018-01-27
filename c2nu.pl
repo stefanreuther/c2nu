@@ -793,13 +793,14 @@ sub makeUtilData {
         # Only current fields. Old fields are managed by PCC.
         if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
             # ignored fields: friendlycode, radius
-            utilWrite(0, pack("vvvvVv",
+            utilWrite(0, pack("vvvvVvvv",
                               $_->{id},
                               $_->{x},
                               $_->{y},
                               rstMapOwnerToRace($parsedReply, $_->{ownerid}),
                               $_->{units},
-                              $_->{isweb} ? 1 : 0));
+                              $_->{isweb},
+                              0,2));
         }
     }
 
@@ -1626,7 +1627,7 @@ sub doServe {
                || $data =~ s/\A\s*\n//sg
                || $data =~ s/\Avar\s+\S+\s*=\s*//sg)
         { }
-        
+
         my $rst = jsonParse($data);
         my $id = $rst->{rst}{game}{id};
         if (!$id) {
