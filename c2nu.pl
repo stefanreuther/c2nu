@@ -793,13 +793,14 @@ sub makeUtilData {
         # Only current fields. Old fields are managed by PCC.
         if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
             # ignored fields: friendlycode, radius
-            utilWrite(0, pack("vvvvVv",
+            utilWrite(0, pack("vvvvVvvv",
                               $_->{id},
                               $_->{x},
                               $_->{y},
                               rstMapOwnerToRace($parsedReply, $_->{ownerid}),
                               $_->{units},
-                              $_->{isweb} ? 1 : 0));
+                              $_->{isweb},
+                              0,2));
         }
     }
 
@@ -2107,6 +2108,9 @@ sub rstSynthesizeMessages {
     $text =~ s| *<br */?> *| |g;
     $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     push @result, rstEncryptMessage($text) if defined($text);
+    
+    #Generate 2nd Message if more than one VPA-Page
+    push @result, rstEncryptMessage(substr($text,0,length($text)-(length($text)-35)).substr($text,18*40)) if (defined($text) and (length($text)>18*40));
 
     # Settings II (from 'game' and NU-Infos)
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (2) >>>",
