@@ -36,7 +36,6 @@
 #  Limitations:
 #  - Can only download RSTs for games that have a server-side directory
 #  - Can only upload TRNs for hosted games
-#  - Does not do HTTPS. Your password/API key will be transmitted in plain-text!
 #  - No handling for other player files yet (ship list etc.)
 #
 #  (c) 2023 Stefan Reuther
@@ -45,12 +44,14 @@ use strict;
 use Socket;
 use IO::Handle;
 use IO::Socket;
+use IO::Socket::INET;
+use IO::Socket::SSL;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
 my $VERSION = "0.3.7";
 
 # Initialisation
-stateSet('api', 'planetscentral.com');
+stateSet('api', 'https://planetscentral.com');
 stateLoad();
 
 # Parse arguments
@@ -413,6 +414,16 @@ sub httpCall {
     my ($head, $body) = @_;
     my $host = stateGet('api');
     my $port = 80;
+    my $ssl = 0;
+
+    # Check http/https
+    if ($host =~ s|^https://||) {
+        $port = 443;
+        $ssl = 1;
+    }
+    $host =~ s|^http://||;
+
+    # Check path
     my $path = '';
     if ($host =~ s|/(.*)$||) {
         $path = $1;
@@ -421,6 +432,7 @@ sub httpCall {
         $port = $1;
     }
     $head =~ s|/|/$path|;           # replace only the first slash, so GET /api/... is translated to GET /test/api/...
+
     $head .= "Host: $host\n";
     $head .= "Content-Length: " . length($body) . "\n";
     $head .= "Connection: close\n";
@@ -431,21 +443,25 @@ sub httpCall {
 
     # Socket cruft
     print "Calling server...\n";
-    my $ip = inet_aton($host) or die "ERROR: unable to resolve host '$host': $!\n";
-    my $paddr = sockaddr_in($port, $ip);
-    socket(HTTP, PF_INET, SOCK_STREAM, getprotobyname('tcp')) or die "ERROR: unable to create socket: $!\n";
-    binmode HTTP;
-    HTTP->autoflush(1);
-    connect(HTTP, $paddr) or die "ERROR: unable to connect to '$host': $!\n";
+    my $raw_socket;
+    my $sock = IO::Socket::INET->new(Proto=>"tcp", PeerAddr=>$host, PeerPort=>$port)
+        or die "ERROR: unable to connect to '$host': $!\n";
+    binmode $sock;
+    $sock->autoflush(1);
+    if ($ssl) {
+        $raw_socket = $sock;
+        $sock = IO::Socket::SSL->new_from_fd($raw_socket, '+<')
+            or die "ERROR: unable to connect SSL: $!\n";
+    }
 
     #print "\033[36m$head$body\033[0m\n";
 
     # Send request
-    print HTTP $head, $body;
+    print $sock $head, $body;
 
     # Read reply header
     my %reply;
-    while (<HTTP>) {
+    while (<$sock>) {
         s/[\r\n]*$//;
         if (/^$/) {
             last
@@ -461,15 +477,16 @@ sub httpCall {
     # Read reply body
     my $replybody;
     if (exists $reply{'content-length'}) {
-        read HTTP, $replybody, $reply{'content-length'}
+        read $sock, $replybody, $reply{'content-length'}
     } else {
         while (1) {
             my $tmp;
-            if (!read(HTTP, $tmp, 4096)) { last }
+            if (!read($sock, $tmp, 4096)) { last }
             $replybody .= $tmp;
         }
     }
-    close HTTP;
+    close($sock);
+    close($raw_socket) if $raw_socket;
 
     # Check status
     if ($reply{STATUS} != 200) {
