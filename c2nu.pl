@@ -94,7 +94,7 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016,2017 Stefan Reuther with additions by Quapla
+#  (c) 2011-2012,2016,2017 Stefan Reuther with additions by Quapla in 2023
 #
 use strict;
 use Socket;
@@ -102,7 +102,7 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.3.7";
+my $VERSION = "0.4.0";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -799,8 +799,8 @@ sub makeUtilData {
                               $_->{y},
                               rstMapOwnerToRace($parsedReply, $_->{ownerid}),
                               $_->{units},
-                              $_->{isweb},
-                              0,2));
+                              $_->{isweb} ? 1 : 0,
+                              0, 2));
         }
     }
 
@@ -962,6 +962,9 @@ sub doUnpack {
 
     # Make util.dat with assorted info
     makeUtilData($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
+
+    # Set VPA Files: VPAADDON.INI + MAP.INI
+    makeVPAfiles($parsedReply);
 
     # Log failed flows
     unpLogFailedFlows($pAdjust);
@@ -1217,7 +1220,13 @@ sub unpPackPlanets {
                     nativegovernment
                     nativeclans
                     nativetype);
+    # NoSupplies -> different Structure Costs - Avoiding Flow-Error while unpacking, Quapla 8.2.23
+    # Todo: Parse unlimitedfuel, unlimitedammo, nowarpwells for VPA support, too
     my @structCosts = (4, 3, 10);
+    if ($parsedReply->{rst}{settings}{nosupplies}) {
+        @structCosts = (5, 4, 11);
+    }
+
     foreach my $planet (@{$parsedReply->{rst}{planets}}) {
         if ($planet->{friendlycode} ne '???' || grep {$planet->{$_} > 0} @fields) {
             # Flow tracking
@@ -1543,6 +1552,76 @@ sub unpLogFailedFlows {
         unlink "c2flow.txt";
     }
 }
+
+######################################################################
+#
+#  VPA
+#
+######################################################################
+
+sub makeVPAfiles{
+    my $parsedReply = shift;
+    my $sizew = $parsedReply->{rst}{settings}{mapwidth};
+    my $sizeh = $parsedReply->{rst}{settings}{mapheight};
+    my $unlimitedfuel = $parsedReply->{rst}{settings}{unlimitedfuel};
+    my $unlimitedammo = $parsedReply->{rst}{settings}{unlimitedammo};
+    my $nosupplies = $parsedReply->{rst}{settings}{nosupplies};
+    if ($sizew == $sizeh) {						# only square maps supported
+        #stateSet('Size', $sizew + 20 );			# Need for correct work
+        print "Updating MAP.INI...\n";
+        stateVPA('MAP', 'Size', $sizew + 20 );  # Need for correct work
+    }
+    #stateSet('unlimitedfuel', $unlimitedfuel);
+    #stateSet('unlimitedammo', $unlimitedammo);
+    #stateSet('nosupplies', $nosupplies);
+    print "Updating VPAADDON.INI...\n";
+    stateVPA('VPAADDON', 'NU', "Yes");
+    stateVPA('VPAADDON', 'NU-UnlimitedFuel', $unlimitedfuel ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-UnlimitedAmmo', $unlimitedammo ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-NoSupplies', $nosupplies ? "Yes" : "No");
+}
+
+### Open VPA-Inifile
+sub stateVPA {
+    my $file = shift;
+    my $key = shift;
+    my $val = shift;
+    my $found = 0;
+    my $host = 0;
+
+    # Copy existing file, updating it
+    open(OUT, "> $file.new") or die "ERROR: cannot create new state file $file.c2u: $!\n";
+    if (open(STATE, "< $file.ini")) {
+        while (<STATE>) {
+            s/[\r\n]*$//;
+            if (/^ *#/ || /^ *$/) {						# Kommentar oder Leerzeile
+                print OUT "$_\n";
+            } elsif (/^(.*?)\s+=\s+(.*)/ && ($key eq $1)) {
+                print OUT "$key = ", stateQuote($val), "\n";
+                $found = 1;
+            } else {
+                print OUT "$_\n";
+            }
+            if ("$_" eq "[HOST]") { $host = 1; }
+        }
+        close STATE;
+    }
+
+    # Print missing keys
+    if (!$host) {
+        print OUT "[HOST]\n";
+    }
+    if (!$found) {
+        print OUT "$key = ", stateQuote($val), "\n";
+    }
+    close OUT;
+
+    # Rename files
+    unlink "$file.bak";
+    rename "$file.ini", "$file.bak";
+    rename "$file.new", "$file.ini" or print "WARNING: cannot rename new state file: $!\n";
+}
+
 
 ######################################################################
 #
