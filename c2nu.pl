@@ -1562,6 +1562,7 @@ sub makeVPAfiles{
 	my $parsedReply = shift;
 	my $sizew = $parsedReply->{rst}{settings}{mapwidth};
 	my $sizeh = $parsedReply->{rst}{settings}{mapheight};
+	my $sphere = $parsedReply->{rst}{settings}{sphere};
 	my $unlimitedfuel = $parsedReply->{rst}{settings}{unlimitedfuel};
 	my $unlimitedammo = $parsedReply->{rst}{settings}{unlimitedammo};
 	my $nosupplies = $parsedReply->{rst}{settings}{nosupplies};
@@ -1570,6 +1571,8 @@ sub makeVPAfiles{
 		print "Updating MAP.INI...\n";
 		stateVPA('MAP', 'Size', $sizew + 20 );  # Need for correct work
 	}
+	#stateSet('sphere', $sphere);
+	stateVPA('MAP', 'Wrap', $sphere ? "Yes" : "No"); # Wrap?
 	#stateSet('unlimitedfuel', $unlimitedfuel);
 	#stateSet('unlimitedammo', $unlimitedammo);
 	#stateSet('nosupplies', $nosupplies);
@@ -1606,7 +1609,7 @@ sub stateVPA {
     }
 
     # Print missing keys
-	if (!$host) {
+	if (!$host && ($file eq "VPAADDON")) {
 		print OUT "[HOST]\n";
 	}
 	if (!$found) {
