@@ -94,7 +94,8 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016,2017 Stefan Reuther with additions by Quapla in 2023
+#  (c) 2011-2012,2016,2017 Stefan Reuther 
+#      2023 with additions by Quapla for VPA
 #
 use strict;
 use Socket;
@@ -102,7 +103,7 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.4.0";
+my $VERSION = "0.4.1";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -1389,12 +1390,23 @@ sub unpPackShips {
             # FIXME: jettison?
             if ($ship->{transfertargettype} == 1) {
                 # Unload
-                $dat .= rstPackFields($ship,
+				#Adddition for new VPA V3.80 client (25th Anniversary)
+				if ($parsedReply->{rst}{settings}{nosupplies} && 
+				    $parsedReply->{rst}{settings}{directtransfermc}) {
+					$dat .= rstPackFields($ship,
+                                      "v7",
+                                      qw(transferneutronium transfertritanium
+                                         transferduranium transfermolybdenum
+                                         transferclans transfermegacredits
+                                         transfertargetid));
+				} else {
+					$dat .= rstPackFields($ship,
                                       "v7",
                                       qw(transferneutronium transfertritanium
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
                                          transfertargetid));
+				}
             } elsif ($ship->{transfertargettype} == 3) {
                 # Jettison
                 $dat .= rstPackFieldsJet($ship,
@@ -1409,12 +1421,22 @@ sub unpPackShips {
             $dis .= "\0" x 14;
             if ($ship->{transfertargettype} == 2) {
                 # Transfer
-                $dat .= rstPackFields($ship,
+				if ($parsedReply->{rst}{settings}{nosupplies} && 
+				    $parsedReply->{rst}{settings}{directtransfermc}) {
+					$dat .= rstPackFields($ship,
+                                      "v7",
+                                      qw(transferneutronium transfertritanium
+                                         transferduranium transfermolybdenum
+                                         transferclans transfermegacredits
+                                         transfertargetid));
+				} else {
+					$dat .= rstPackFields($ship,
                                       "v7",
                                       qw(transferneutronium transfertritanium
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
                                          transfertargetid));
+				}
             } else {
                 $dat .= "\0" x 14;
             }
@@ -1425,7 +1447,7 @@ sub unpPackShips {
             #}
 
             if ($ship->{transfermegacredits} || $ship->{transferammo}) {
-                print "WARNING: transfer of mc and/or ammo not implemented yet\n";
+                print "WARNING: transfer of mc and/or ammo only for VPA V3.80 yet\n";
             }
 
             # Remainder of mission
@@ -1566,6 +1588,8 @@ sub makeVPAfiles{
 	my $unlimitedfuel = $parsedReply->{rst}{settings}{unlimitedfuel};
 	my $unlimitedammo = $parsedReply->{rst}{settings}{unlimitedammo};
 	my $nosupplies = $parsedReply->{rst}{settings}{nosupplies};
+	my $DirectTransferAmmo  = $parsedReply->{rst}{settings}{directtransferammo};
+	my $DirectTransferMC  = $parsedReply->{rst}{settings}{directtransfermc};
 	if ($sizew == $sizeh) {						# only square maps supported
 		#stateSet('Size', $sizew + 20 );			# Need for correct work
 		print "Updating MAP.INI...\n";
@@ -1581,6 +1605,8 @@ sub makeVPAfiles{
 	stateVPA('VPAADDON', 'NU-UnlimitedFuel', $unlimitedfuel ? "Yes" : "No");
 	stateVPA('VPAADDON', 'NU-UnlimitedAmmo', $unlimitedammo ? "Yes" : "No");
 	stateVPA('VPAADDON', 'NU-NoSupplies', $nosupplies ? "Yes" : "No");
+	stateVPA('VPAADDON', 'NU-DirectTransferAmmo', $DirectTransferAmmo ? "Yes" : "No");
+	stateVPA('VPAADDON', 'NU-DirectTransferMC', $DirectTransferMC ? "Yes" : "No");
 }
 ### Open VPA-Inifile
 sub stateVPA {
@@ -2183,17 +2209,23 @@ sub rstSynthesizeMessages {
     # Settings I (from 'game')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
                                     $parsedReply->{rst}{game},
-                                    [name=>"Game Name: %s"], [description=>"Description: %s"]);
+                                    [name=>"Game Name: %s"],
+									[id=>"ID: %s"],									
+									[shortdescription=>"Short Description: %s"],
+									[description=>"Description: %s"]);
     # Wordwrap for VPA
     $text =~ s| *<br */?> *| |g;
+	$text =~ s|<sub>.*?<\/sub>||g;
     $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     push @result, rstEncryptMessage($text) if defined($text);
 
     # Settings II (from 'game' and NU-Infos)
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (2) >>>",
                                     $parsedReply->{rst}{game},
+									[timetohost=>"Time to Host: %s"],
                                     [hostdays=>"Host Days: %s"],
-                                    [hosttime=>"Host Time: %s"], "\n", [masterplanetid=>"Master Planet Id: %s"], "\n");
+                                    [hosttime=>"Host Time: %s"], "\n",
+									[masterplanetid=>"Master Planet Id: %s"], "\n");
     $text .= "User Name: ".stateGet('user')."\n";
     $text .= "Game Number: ".stateGet('gameid')."\n";
     $text .= "c2nu version: $VERSION\n";
@@ -2202,19 +2234,26 @@ sub rstSynthesizeMessages {
     # Settings III (from 'settings')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (3) >>>",
                                  $parsedReply->{rst}{settings},
-                                 [buildqueueplanetid => "Build Queue Planet: %s"],
                                  [turn               => "Turn %s"],
+                                 [buildqueueplanetid => "Build Queue Planet: %s"],
                                  [victorycountdown   => "Victory Countdown: %s"],
                                  "\n",
+								 [fightorfail        => "Fight Or Fail: %s"],
+								 [fofaccelstartturn  => "FOF Accel Start Turn: %s"],
+								 [fofaccelstartturn  => "FOF Accel Start Date: %s"],
+								 "\n",
                                  [hoststart          => "Host started: %s"],
                                  [hostcompleted      => "Host completed: %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
 
     # Host config (from 'settings')
-    $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration >>>",
+    $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (1)>>>",
                                  $parsedReply->{rst}{settings},
                                  [cloakfail          => "Odds of cloak failure  %s %%"],
                                  [maxions            => "Ion Storms             %s"],
+								 [nebulas            => "Nebulas                %s"],
+								 [stars              => "Stars                  %s"],
+								 [maxwormholes       => "Wormholes              %s"],
                                  [shipscanrange      => "Ships are visible at   %s"],
                                  [structuredecayrate => "structure decay        %s"],
                                  "\n",
@@ -2226,6 +2265,26 @@ sub rstSynthesizeMessages {
                                  [numplanets         => "Number of planets      %s"],
                                  [shiplimit          => "Max number of ships    %s"],
                                  [planetscanrange    => "Planets are visible at %s"]);
+    push @result, rstEncryptMessage($text) if defined($text);
+
+	$text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (2)>>>",
+                                 $parsedReply->{rst}{settings},
+                                 [campaignmode            => "campaignmode            %s %%"],
+                                 [fascistdoublebeams      => "fascistdoublebeams      %s"],
+								 [starbasefightertransfer => "starbasefightertransfer %s"],
+								 [superspyadvanced        => "superspyadvanced        %s"],
+								 [cloakandintercept       => "cloakandintercept       %s"],
+                                 [quantumtorpedos         => "quantumtorpedos         %s"],
+                                 [galacticpower           => "galacticpower           %s"],
+                                 "\n",
+                                 [cloningenabled          => "cloningenabled          %s"],
+                                 [unlimitedfuel           => "/unlimitedfuel/         %s"],
+                                 [unlimitedammo           => "unlimitedammo           %s"],
+                                 "\n",
+                                 [nosupplies              => "/nosupplies/            %s"],
+                                 [nowarpwells             => "nowarpwells             %s"],
+                                 [directtransfermc        => "/directtransfermc/      %s"],
+                                 [directtransferammo      => "directtransferammo      %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
 
     # HConfig arrays
@@ -2818,9 +2877,12 @@ sub mktPackShip {
     my $m = $s->{mission} - 1;
     my $t1 = $m==7 ? $s->{intid} : $m==6 ? $s->{towid} : 0;
     my $t2 = 0;
-
+	
     # Transfer
     my @x;
+	my $ts = 0;
+	my $tmc = 0;
+
     if (mktShipHasTransfer($s, 'unload')) {
         if (mktShipHasTransfer($s, 'transfer')) {
             print "WARNING: ship $s->{id} has unload and transfer order at the same time, transfer was ignored\n";
@@ -2828,12 +2890,20 @@ sub mktPackShip {
         #print "Quapla2: ship $s->{id} unloads to #$s->{unloadid}\n";
         my $TType;
         if ($s->{unloadid} eq 0) { $TType = 3; } else { $TType = 1; }
+		#Adddition for new VPA V3.80 client (25th Anniversary)
+		if ($parsedReply->{rst}{settings}{nosupplies} && 
+		    $parsedReply->{rst}{settings}{directtransfermc}) {
+			$ts = 0; $tmc = $s->{unloadsupplies};
+		} else {
+			$tmc = 0; $ts = $s->{unloadsupplies};
+		}
+		
         @x = (TransferNeutronium => $s->{unloadneutronium},
               TransferDuranium => $s->{unloadduranium},
               TransferTritanium => $s->{unloadtritanium},
               TransferMolybdenum => $s->{unloadmolybdenum},
-              TransferMegaCredits => 0,
-              TransferSupplies => $s->{unloadsupplies},
+              TransferMegaCredits => $tmc,
+              TransferSupplies => $ts,
               TransferClans => $s->{unloadclans},
               TransferAmmo => 0,
               TransferTargetId => $s->{unloadid},
@@ -2843,8 +2913,8 @@ sub mktPackShip {
               TransferDuranium => $s->{transferduranium},
               TransferTritanium => $s->{transfertritanium},
               TransferMolybdenum => $s->{transfermolybdenum},
-              TransferMegaCredits => 0,
-              TransferSupplies => $s->{transfersupplies},
+              TransferMegaCredits => $tmc,
+              TransferSupplies => $ts,
               TransferClans => $s->{transferclans},
               TransferAmmo => 0,
               TransferTargetId => $s->{transferid},
