@@ -1330,7 +1330,7 @@ sub unpPackShips {
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
         if ($ship->{ownerid} == $player) {
             # Flow tracking
-            my $adjkey = $ship->{x} . "," . $ship->{y};
+            my $adjkey = $ship->{x} . "," . $ship->{y} . " Ship ID " . $ship->{ownerid};
 
             # Id, owner, fcode, warp, location, most specs
             my $dat = rstPackFields($ship, "v", qw(id));
@@ -1447,10 +1447,6 @@ sub unpPackShips {
             #    print "WARNING: Jettison not implemented yet\n";
             #}
 
-            if ($ship->{transfermegacredits} || $ship->{transferammo}) {
-                print "WARNING: transfer of mc and/or ammo only for VPA V3.80 yet\n";
-            }
-
             # Remainder of mission
             $msn = pack("v", $ship->{mission} == 7 ? $ship->{mission1target} : 0);
             $dat .= $msn;
@@ -1460,6 +1456,16 @@ sub unpPackShips {
             my $newMC = $ship->{megacredits};
             my $oldMC = unpAdjustUse($newMC, $pAdjust, $adjkey, "cashUsed");
             $oldMC = unpAdjustConsume($oldMC, $pAdjust, $adjkey, "cashMade");
+            if ($ship->{transfermegacredits} || $ship->{transferammo}) {
+                if ($parsedReply->{rst}{settings}{nosupplies}) {
+                    print "WARNING: transfer of $ship->{transfermegacredits} MC / $ship->{transferammo} ammo from Ship-ID $ship->{id} only for VPA V3.80 yet\n";
+                } else {
+                    print  "WARNING: transfer of $ship->{transfermegacredits} MC / $ship->{transferammo} ammo from Ship-ID $ship->{id} not possible yet\n";
+                    $pAdjust->{$adjkey}{$newMC} += $ship->{transfermegacredits} ;
+                    $pAdjust->{$adjkey}{$newMC} += $ship->{transferammo} ;
+                }
+            }
+
 
             $dat .= pack("v", $newMC);
             $dis .= pack("v", $oldMC);
@@ -1566,7 +1572,7 @@ sub unpLogFailedFlows {
     }
 
     if (@log) {
-        printf "WARNING: %d flows not resolved, see c2flow.txt.\n", scalar(@log);
+        printf "WARNING: %d flows not resolved, see c2flow.txt.\n\n%s\n", scalar(@log), @log;
         open LOG, "> c2flow.txt" or die "c2flow.txt: $!\n";
         print LOG @log;
         close LOG;
@@ -2214,7 +2220,8 @@ sub rstSynthesizeMessages {
                                  [name=>"Game Name: %s"],
                                  [id=>"ID: %s"],
                                  [shortdescription=>"Short Description: %s"],
-                                 [description=>"Description: %s"]);
+                                 "\n",
+                                 [description=>"%s"]);
     # Wordwrap for VPA
     $text =~ s| *<br */?> *| |g;
     $text =~ s|<sub>.*?<\/sub>||g;
@@ -2236,57 +2243,58 @@ sub rstSynthesizeMessages {
     # Settings III (from 'settings')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (3) >>>",
                                  $parsedReply->{rst}{settings},
-                                 [turn               => "Turn %s"],
-                                 [buildqueueplanetid => "Build Queue Planet: %s"],
-                                 [victorycountdown   => "Victory Countdown: %s"],
+                                 [turn               => "Turn                  %s"],
+                                 [buildqueueplanetid => "Build Queue Planet:   %s"],
+                                 [victorycountdown   => "Victory Countdown:    %s"],
                                  "\n",
-                                 [fightorfail        => "Fight Or Fail: %s"],
+                                 [fightorfail        => "Fight Or Fail:        ". ($parsedReply->{rst}{settings}{campaignmode} == 1 ? "Yes" : "No")],
                                  [fofaccelstartturn  => "FOF Accel Start Turn: %s"],
                                  [fofaccelstartturn  => "FOF Accel Start Date: %s"],
                                  "\n",
-                                 [hoststart          => "Host started: %s"],
+                                 [hoststart          => "Host started:   %s"],
                                  [hostcompleted      => "Host completed: %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
 
     # Host config (from 'settings')
     $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (1)>>>",
                                  $parsedReply->{rst}{settings},
-                                 [cloakfail          => "Odds of cloak failure  %s %%"],
-                                 [maxions            => "Ion Storms             %s"],
-                                 [nebulas            => "Nebulas                %s"],
-                                 [stars              => "Stars                  %s"],
-                                 [maxwormholes       => "Wormholes              %s"],
-                                 [shipscanrange      => "Ships are visible at   %s"],
-                                 [structuredecayrate => "structure decay        %s"],
+                                 [cloakfail          => "Odds of cloak failure         %s %%"],
+                                 [maxions            => "Ion Storms                    %s"],
+                                 [nebulas            => "Nebulas                       %s"],
+                                 [stars              => "Stars                         %s"],
+                                 [maxwormholes       => "Wormholes                     %s"],
+                                 [shipscanrange      => "Ships are visible at          %s"],
+                                 [structuredecayrate => "structure decay               %s"],
                                  "\n",
-                                 [mapwidth           => "Map width              %s"],
-                                 [mapheight          => "Map height             %s"],
-                                 [sphere             => "Wrap                   %s"],
+                                 [mapwidth           => "Map width                     %s"],
+                                 [mapheight          => "Map height                    %s"],
+                                 [sphere             => "Wrap                          ". ($parsedReply->{rst}{settings}{sphere} == 1 ? "Yes" : "No")],
                                  "\n",
-                                 [maxallies          => "Maximum allies         %s"],
-                                 [numplanets         => "Number of planets      %s"],
-                                 [shiplimit          => "Max number of ships    %s"],
-                                 [planetscanrange    => "Planets are visible at %s"]);
+                                 [maxallies          => "Maximum allies                %s"],
+                                 [numplanets         => "Number of planets             %s"],
+                                 [shiplimit          => "Max number of ships           %s"],
+                                 [planetscanrange    => "Planets are visible at        %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
 
     $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (2)>>>",
                                  $parsedReply->{rst}{settings},
-                                 [campaignmode            => "campaignmode            %s %%"],
-                                 [fascistdoublebeams      => "fascistdoublebeams      %s"],
-                                 [starbasefightertransfer => "starbasefightertransfer %s"],
-                                 [superspyadvanced        => "superspyadvanced        %s"],
-                                 [cloakandintercept       => "cloakandintercept       %s"],
-                                 [quantumtorpedos         => "quantumtorpedos         %s"],
-                                 [galacticpower           => "galacticpower           %s"],
+                                 [campaignmode            => "Campaign Mode                 ". ($parsedReply->{rst}{settings}{campaignmode} == 1 ? "Yes" : "No")],
+                                 [fascistdoublebeams      => "Fascist Double Beams          ". ($parsedReply->{rst}{settings}{fascistdoublebeams} == 1 ? "Yes" : "No")],
+                                 [starbasefightertransfer => "Starbase Fighter Transfer     ". ($parsedReply->{rst}{settings}{starbasefightertransfer} == 1 ? "Yes" : "No")],
+                                 [superspyadvanced        => "Superspy Advanced             ". ($parsedReply->{rst}{settings}{superspyadvanced} == 1 ? "Yes" : "No")],
+                                 [cloakandintercept       => "Cloak and intercept           ". ($parsedReply->{rst}{settings}{cloakandintercept} == 1 ? "Yes" : "No")],
+                                 [quantumtorpedos         => "Quantumtorpedos               ". ($parsedReply->{rst}{settings}{quantumtorpedos} == 1 ? "Yes" : "No")],
+                                 [galacticpower           => "Galacticpower                 ". ($parsedReply->{rst}{settings}{galacticpower} == 1 ? "Yes" : "No")],
                                  "\n",
-                                 [cloningenabled          => "cloningenabled          %s"],
-                                 [unlimitedfuel           => "/unlimitedfuel/         %s"],
-                                 [unlimitedammo           => "unlimitedammo           %s"],
+                                 [cloningenabled          => "Cloning enabled               ". ($parsedReply->{rst}{settings}{cloningenabled} == 1 ? "Yes" : "No")],
+                                 [unlimitedfuel           => "unlimited Fuel                ". ($parsedReply->{rst}{settings}{unlimitedfuel} == 1 ? "Yes" : "No")],
+                                 [unlimitedammo           => "unlimited Ammo                ". ($parsedReply->{rst}{settings}{unlimitedammo} == 1 ? "Yes" : "No")],
                                  "\n",
-                                 [nosupplies              => "/nosupplies/            %s"],
-                                 [nowarpwells             => "nowarpwells             %s"],
-                                 [directtransfermc        => "/directtransfermc/      %s"],
-                                 [directtransferammo      => "directtransferammo      %s"]);
+                                 [nosupplies              => "no Supplies                   ". ($parsedReply->{rst}{settings}{nosupplies} == 1 ? "Yes" : "No")],
+                                 [nowarpwells             => "no Warpwells                  ". ($parsedReply->{rst}{settings}{nowarpwells} == 1 ? "Yes" : "No")],
+                                 [directtransfermc        => "direct transfer MC            ". ($parsedReply->{rst}{settings}{directtransfermc} == 1 ? "Yes" : "No")],
+                                 [directtransferammo      => "direct transfer Ammo          ". ($parsedReply->{rst}{settings}{directtransferammo} == 1 ? "Yes" : "No")]);
+
     push @result, rstEncryptMessage($text) if defined($text);
 
     # HConfig arrays
@@ -2884,6 +2892,7 @@ sub mktPackShip {
     my @x;
     my $ts = 0;
     my $tmc = 0;
+    my $tma = 0;
 
     if (mktShipHasTransfer($s, 'unload')) {
         if (mktShipHasTransfer($s, 'transfer')) {
@@ -2893,12 +2902,30 @@ sub mktPackShip {
         my $TType;
         if ($s->{unloadid} eq 0) { $TType = 3; } else { $TType = 1; }
         #Adddition for new VPA V3.80 client (25th Anniversary)
+
         if ($parsedReply->{rst}{settings}{nosupplies} &&
             $parsedReply->{rst}{settings}{directtransfermc}) {
+            #use TransferSupplies as MC, since no supplies allowed
             $ts = 0; $tmc = $s->{unloadsupplies};
         } else {
-            $tmc = 0; $ts = $s->{unloadsupplies};
+            #use transfer supplies, and try to use original transer MC/ammo
+            $ts = $s->{unloadsupplies};
+            if ($origShip->{transfermegacredits} || $origShip->{transferammo}) {
+                $tmc = $origShip->{transfermegacredits};
+                $tma = $origShip->{transferammo};
+                print "WARNING: Original ship $s->{id} transfer of $origShip->{transfermegacredits} MC / $origShip->{transferammo} Ammo reestablished from NU-RST\n";
+            }
         }
+
+#        if ($ship->{transfermegacredits} || $ship->{transferammo}) {
+#            if ($parsedReply->{rst}{settings}{nosupplies}) {
+#                print "WARNING: transfer of mc and/or ammo only for VPA V3.80 yet\n";
+#            } else {
+#                print  "WARNING: transfer of mc and/or ammo not possible yet\n";
+#                $pAdjust->{$adjkey}{$newMC} += $ship->{transfermegacredits} ;
+#                $pAdjust->{$adjkey}{$newMC} += $ship->{transferammo} ;
+#            }
+#        }
 
         @x = (TransferNeutronium => $s->{unloadneutronium},
               TransferDuranium => $s->{unloadduranium},
@@ -2907,7 +2934,7 @@ sub mktPackShip {
               TransferMegaCredits => $tmc,
               TransferSupplies => $ts,
               TransferClans => $s->{unloadclans},
-              TransferAmmo => 0,
+              TransferAmmo => $tma,
               TransferTargetId => $s->{unloadid},
               TransferTargetType => $TType);
     } elsif (mktShipHasTransfer($s, 'transfer')) {
@@ -2918,7 +2945,7 @@ sub mktPackShip {
               TransferMegaCredits => $tmc,
               TransferSupplies => $ts,
               TransferClans => $s->{transferclans},
-              TransferAmmo => 0,
+              TransferAmmo => $tma,
               TransferTargetId => $s->{transferid},
               TransferTargetType => 2);
     } else {
