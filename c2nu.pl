@@ -103,10 +103,11 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.4.1";
+my $VERSION = "0.4.3";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
+my $USE_Hulls = 220;
 
 # Initialisation
 stateSet('api', 'api.planets.nu');
@@ -524,11 +525,11 @@ sub makeAllSpecFiles {
     # Simple spec files
     makeSpecFile($parsedReply->{rst}{beams}, "beamspec.dat", 10, "A20v8", 36,
                  qw(name cost tritanium duranium molybdenum mass techlevel crewkill damage));
-    makeSpecFile($parsedReply->{rst}{torpedos}, "torpspec.dat", 10, "A20v9", 38,
+    makeSpecFile($parsedReply->{rst}{torpedos}, "torpspec.dat", 11, "A20v9", 38,
                  qw(name torpedocost launchercost tritanium duranium molybdenum mass techlevel crewkill damage));
     makeSpecFile($parsedReply->{rst}{engines}, "engspec.dat", 9, "A20v5V9", 66,
                  qw(name cost tritanium duranium molybdenum techlevel warp1 warp2 warp3 warp4 warp5 warp6 warp7 warp8 warp9));
-    makeSpecFile($parsedReply->{rst}{hulls}, "hullspec.dat", 105, "A30v15", 60,
+    makeSpecFile($parsedReply->{rst}{hulls}, "hullspec.dat", $USE_Hulls, "A30v15", 60,
                  qw(name zzimage zzunused tritanium duranium molybdenum fueltank
                     crew engines mass techlevel cargo fighterbays launchers beams cost));
     makeSpecFile($parsedReply->{rst}{planets}, "xyplan.dat", 500, "v3", 6,
@@ -550,6 +551,9 @@ sub makeSpecFile {
     my $packPattern = shift;
     my $entrySize = shift;
     my @fields = @_;
+    my $count = 0;
+    my $countID = 0;
+    my $HullID;
 
     print "Making $fileName...\n";
 
@@ -561,6 +565,8 @@ sub makeSpecFile {
         push @entryTemplate, 0;
     }
 
+    #print "Making $count $replyPart in $fileName...\n";
+
     # Load existing file or build empty file
     my @file;
     if ($fileName eq 'xyplan.dat') {
@@ -570,12 +576,19 @@ sub makeSpecFile {
         }
     } elsif (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
         binmode FILE;
-        foreach (1 .. $numEntries) {
+        foreach (1 .. 105) {
             my $buf;
             read FILE, $buf, $entrySize;
             push @file, [unpack $packPattern, $buf];
         }
         close FILE;
+        if (($numEntries > 105) && ($fileName eq 'hullspec.dat')) {
+            print "WARNING: 'hullspec.dat' hulls 106 to $numEntries created from scratch; it will not contain image references.\n";
+            foreach (106 .. $numEntries) {
+                if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
+                push @file, [@entryTemplate];
+            }
+        }
     } else {
         if ($fileName eq 'hullspec.dat') {
             print "WARNING: 'hullspec.dat' created from scratch; it will not contain image references.\n";
@@ -589,15 +602,46 @@ sub makeSpecFile {
     }
 
     # Populate file
+    $count = 0;
+    $countID = 105;
+    if (($numEntries>$USE_Hulls) && ($fileName eq 'hullspec.dat')) {
+        print "VPA V3.80 Can handle max. $USE_Hulls Shiphulls (yet) - contact VPA-Crew to fix\n";
+    }
     foreach my $e (@$replyPart) {
-        if ($e->{id} > 0 && $e->{id} <= $numEntries) {
-            foreach (sort keys %$e) {
-                if (exists $fieldToSlot{$_}) {
-                    $file[$e->{id} - 1][$fieldToSlot{$_}] = $e->{$_};
+        if ($fileName eq 'hullspec.dat') {
+            $count += 1;
+            # now VPA can handle all 220 shiphulls
+            if (($e->{id} > 0) && ($countID <= $numEntries)) {
+                if ($e->{id} <= 105) {
+                    $HullID = $e->{id}
+                } else {
+                    # Map ID > 105
+                    $countID += 1;
+                    stateSet($e->{id}, $countID);
+                    $HullID = $countID;
+                    print "ID $e->{id} is $e->{name} as NEWHull $countID done\n";
+                }
+                foreach (sort keys %$e) {
+                    if (exists $fieldToSlot{$_}) {
+                        $file[$HullID - 1][$fieldToSlot{$_}] = $e->{$_};
+                        #print "ID $e->{id} is $e->{name} as NEWHull $HullID done\n";
+                    }
+                }
+            }
+        } else {
+            # Populate other files
+            foreach my $e (@$replyPart) {
+                if ($e->{id} > 0 && $e->{id} <= $numEntries) {
+                    foreach (sort keys %$e) {
+                        if (exists $fieldToSlot{$_}) {
+                            $file[$e->{id} - 1][$fieldToSlot{$_}] = $e->{$_};
+                        }
+                    }
                 }
             }
         }
     }
+    #if ($fileName eq 'hullspec.dat') {print "$count Hulls and $countID NEWHulls\n";}
 
     # Generate it
     open FILE, "> $fileName" or die "$fileName: $!\n";
@@ -635,6 +679,7 @@ sub makeHullfuncFile {
 sub makeTruehullFile {
     my $pRacehulls = shift;
     my $player = shift;
+    my $HullID;
 
     print "Making truehull.dat...\n";
 
@@ -651,6 +696,11 @@ sub makeTruehullFile {
     # Merge race hulls
     for (my $i = 0; $i < 20; ++$i) {
         $truehull[($player-1)*20 + $i] = ($i < @$pRacehulls ? $pRacehulls->[$i] : 0);
+        # Map ID > 105
+        if (($truehull[($player-1)*20 + $i]) > 105) {
+            $truehull[($player-1)*20 + $i] = stateGet(($truehull[($player-1)*20 + $i]));
+            print "Hull $pRacehulls->[$i] transformed to $truehull[($player-1)*20 + $i]\n";
+        }
     }
 
     # Write
@@ -1328,6 +1378,11 @@ sub unpPackShips {
     my @dis;
 
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
+        if ($ship->{hullid} > 105) {
+            print "unpPackShips: Ship $ship->{hullid} patched to";
+            $ship->{hullid} = stateGet($ship->{hullid});
+            print " Ship $ship->{hullid}\n";
+        }
         if ($ship->{ownerid} == $player) {
             # Flow tracking
             my $adjkey = $ship->{x} . "," . $ship->{y} . " Ship ID " . $ship->{ownerid};
@@ -1344,6 +1399,21 @@ sub unpPackShips {
             $dat .= rstPackFields($ship,
                                   "v8",
                                   qw(x y engineid hullid beamid beams bays torpedoid));
+
+#            $dat .= rstPackFields($ship,
+#                                  "v3",
+#                                  qw(x y engineid));
+#            # Map HullID > 105
+#            if ($ship->{hullid} <= 105) {
+#                $dat .= pack("v",$ship->{hullid});
+#            } else {
+#                $dat .= pack("v",stateGet($ship->{hullid}));
+#                print "Ship $ship->{hullid} unpacked to stateGet($ship->{hullid})";
+#            }
+#            $dat .= rstPackFields($ship,
+#                                  "v4",
+#                                  qw(beamid beams bays torpedoid));
+
             my $dis = $dat;
 
             # Ammo
@@ -1598,7 +1668,6 @@ sub makeVPAfiles{
     my $DirectTransferAmmo  = $parsedReply->{rst}{settings}{directtransferammo};
     my $DirectTransferMC  = $parsedReply->{rst}{settings}{directtransfermc};
     if ($sizew == $sizeh) {						# only square maps supported
-        #stateSet('Size', $sizew + 20 );			# Need for correct work
         print "Updating MAP.INI...\n";
         stateVPA('MAP', 'Size', $sizew + 20 );  # Need for correct work
     }
@@ -1926,7 +1995,13 @@ sub rstPackShips {
     my $parsedReply = shift;
     my $player = shift;
     my @packedShips;
+    #my $HullID;
+
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
+        if ($ship->{hullid} > 105) {
+            print "rstPackShips: Ship $ship->{hullid} patched to";
+            $ship->{hullid} = stateGet($ship->{hullid});
+            print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
         if ($ship->{ownerid} == $player) {
             my $p = rstPackFields($ship, "v", qw(id));
             $p .= pack("v", rstMapOwnerToRace($parsedReply, $ship->{ownerid}));
@@ -1939,6 +2014,22 @@ sub rstPackShips {
             $p .= rstPackFields($ship,
                                 "v10",
                                 qw(x y engineid hullid beamid beams bays torpedoid ammo torps));
+
+#            $p .= rstPackFields($ship,
+#                                "v3",
+#                                qw(x y engineid));
+#            # Map HullID > 105
+#            if ($ship->{hullid} <= 105) {
+#                $p .= pack("v",$ship->{hullid});
+#            } else {
+#                $HullID = stateGet($ship->{hullid});
+#                $p .= pack("v", $HullID);
+#                print "Ship $ship->{hullid} unpacked to $HullID\n";
+#            }
+#            $p .= rstPackFields($ship,
+#                                "v6",
+#                                qw(beamid beams bays torpedoid ammo torps));
+#
             if ($ship->{mission} >= 0) {
                 # Missions are off-by-one!
                 $p .= pack("v", $ship->{mission} + 1);
@@ -2002,6 +2093,11 @@ sub rstPackTargets {
     my $player = shift;
     my @packedShips;
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
+        if ($ship->{hullid} > 105) {
+            #print "rstPackTargets: Ship $ship->{hullid} patched to";
+            #$ship->{hullid} = stateGet($ship->{hullid});
+            #print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
+            print "rstPackTargets:  Ship $ship->{hullid} already patched\n"; } #Patch ship's hullid
         if ($ship->{ownerid} != $player) {
             push @packedShips,
               rstPackFields($ship, "v", qw(id))
@@ -2213,6 +2309,9 @@ sub rstSynthesizeMessages {
     my $player = shift;
     my @result;
     my $text;
+    my $count = 1;
+    my $row = 0;
+    my $answer;
 
     # Settings I (from 'game')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
@@ -2258,7 +2357,7 @@ sub rstSynthesizeMessages {
     # Host config (from 'settings')
     $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (1)>>>",
                                  $parsedReply->{rst}{settings},
-                                 [cloakfail          => "Odds of cloak failure         %s %%"],
+                                 [cloakfail          => "Odds of cloak failure         %s%%"],
                                  [maxions            => "Ion Storms                    %s"],
                                  [nebulas            => "Nebulas                       %s"],
                                  [stars              => "Stars                         %s"],
@@ -2296,6 +2395,19 @@ sub rstSynthesizeMessages {
                                  [directtransferammo      => "direct transfer Ammo          ". ($parsedReply->{rst}{settings}{directtransferammo} == 1 ? "Yes" : "No")]);
 
     push @result, rstEncryptMessage($text) if defined($text);
+
+#    $text = "(-g0000)<<< Host Configuration ($count)>>>\n\n";
+#    foreach ( @$parsedReply->{rst}{settings} ) {
+#        $answer = $parsedReply->{rst}{settings}{$_};
+#        text .= sprintf($_, ($answer == 1 ? "Yes" : "No") , "\n");
+#       row += 1;
+#        if (row = 16) {
+#            row = 0;
+#            $count += 1;
+#            push @result, rstEncryptMessage($text) if defined($text);
+#            $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration ($count)>>>\n\n";
+#        }
+#    }
 
     # HConfig arrays
     foreach ([freefighters=>"Free fighters at starbases", "%3s"],
@@ -2349,6 +2461,12 @@ sub rstPackShipXY {
     my @shipxy = replicate(999*4, 0);
 
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
+        if ($ship->{hullid} > 105) {
+            #print "rstPackShipXY: Ship $ship->{hullid} patched to";
+            #$ship->{hullid} = stateGet($ship->{hullid});
+            #print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
+            print "rstPackShipXY: Ship $ship->{hullid} already patched\n";
+        } #Patch ship's hullid
         if ($ship->{id} > 0 && $ship->{id} <= 999) {
             my $pos = ($ship->{id} - 1) * 4;
             $shipxy[$pos]   = $ship->{x};
