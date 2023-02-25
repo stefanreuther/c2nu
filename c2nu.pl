@@ -103,7 +103,7 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.4.3";
+my $VERSION = "0.4.4";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
@@ -565,8 +565,6 @@ sub makeSpecFile {
         push @entryTemplate, 0;
     }
 
-    #print "Making $count $replyPart in $fileName...\n";
-
     # Load existing file or build empty file
     my @file;
     if ($fileName eq 'xyplan.dat') {
@@ -574,27 +572,41 @@ sub makeSpecFile {
         foreach (1 .. $numEntries) {
             push @file, [0,0,0];
         }
+    } elsif ($fileName eq 'hullspec.dat') {
+        # If hullsepc.dat exists fill hulls > 105 with empty pics, otherwise use all empty pics
+        if (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
+            binmode FILE;
+            foreach (1 .. 105) {
+                my $buf;
+                read FILE, $buf, $entrySize;
+                push @file, [unpack $packPattern, $buf];
+            }
+            close FILE;
+            if ($numEntries > 105)  {
+                print "WARNING: 'hullspec.dat' hulls 106 to $numEntries created from scratch; it will not contain image references.\n";
+                foreach (106 .. $numEntries) {
+                    if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
+                    push @file, [@entryTemplate];
+                }
+            }
+        } else {
+            print "WARNING: 'hullspec.dat' created from scratch; it will not contain image references.\n";
+            print "    Copy a pre-existing 'hullspec.dat' into this directory and process the RST again\n";
+            print "    to have images.\n";
+            foreach (1 .. $numEntries) {
+                if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
+                push @file, [@entryTemplate];
+            }
+        }
     } elsif (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
         binmode FILE;
-        foreach (1 .. 105) {
+        foreach (1 .. $numEntries) {
             my $buf;
             read FILE, $buf, $entrySize;
             push @file, [unpack $packPattern, $buf];
         }
         close FILE;
-        if (($numEntries > 105) && ($fileName eq 'hullspec.dat')) {
-            print "WARNING: 'hullspec.dat' hulls 106 to $numEntries created from scratch; it will not contain image references.\n";
-            foreach (106 .. $numEntries) {
-                if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
-                push @file, [@entryTemplate];
-            }
-        }
     } else {
-        if ($fileName eq 'hullspec.dat') {
-            print "WARNING: 'hullspec.dat' created from scratch; it will not contain image references.\n";
-            print "    Copy a pre-existing 'hullspec.dat' into this directory and process the RST again\n";
-            print "    to have images.\n";
-        }
         foreach (1 .. $numEntries) {
             if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
             push @file, [@entryTemplate];
@@ -602,13 +614,13 @@ sub makeSpecFile {
     }
 
     # Populate file
-    $count = 0;
-    $countID = 105;
-    if (($numEntries>$USE_Hulls) && ($fileName eq 'hullspec.dat')) {
-        print "VPA V3.80 Can handle max. $USE_Hulls Shiphulls (yet) - contact VPA-Crew to fix\n";
-    }
-    foreach my $e (@$replyPart) {
-        if ($fileName eq 'hullspec.dat') {
+    if ($fileName eq 'hullspec.dat') {
+        $count = 0;
+        $countID = 105;
+        if ($numEntries>$USE_Hulls)  {
+            print "VPA V3.80 Can handle max. $USE_Hulls Shiphulls (yet) - contact VPA-Crew to fix\n";
+        }
+        foreach my $e (@$replyPart) {
             $count += 1;
             # now VPA can handle all 220 shiphulls
             if (($e->{id} > 0) && ($countID <= $numEntries)) {
@@ -628,20 +640,19 @@ sub makeSpecFile {
                     }
                 }
             }
-        } else {
-            # Populate other files
-            foreach my $e (@$replyPart) {
-                if ($e->{id} > 0 && $e->{id} <= $numEntries) {
-                    foreach (sort keys %$e) {
-                        if (exists $fieldToSlot{$_}) {
-                            $file[$e->{id} - 1][$fieldToSlot{$_}] = $e->{$_};
-                        }
+        }
+    } else {
+        # Populate other files
+        foreach my $e (@$replyPart) {
+            if ($e->{id} > 0 && $e->{id} <= $numEntries) {
+                foreach (sort keys %$e) {
+                    if (exists $fieldToSlot{$_}) {
+                        $file[$e->{id} - 1][$fieldToSlot{$_}] = $e->{$_};
                     }
                 }
             }
         }
     }
-    #if ($fileName eq 'hullspec.dat') {print "$count Hulls and $countID NEWHulls\n";}
 
     # Generate it
     open FILE, "> $fileName" or die "$fileName: $!\n";
