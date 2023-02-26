@@ -32,6 +32,11 @@ Differences between Nu data model and VGA Planets
     not both. This matches the planets.exe GUI restriction, but not
     the file format as implemented by 3rd party. The type is
     identified by the transfertargettype field (1=planet, 2=ship).
+  - transfermegacredits is stored in VPA in "transfersupplies" and 
+    switched vice versa within unpack/packing.
+  - Download all 220 Hulls from Nu and store them for use in VPA/PCC,
+    doing a HullID patch to skip the gaps. 
+  - With maketurn the patches are undone...
 
   The "planets" section is used for "pdata.dat", "xyplan.dat", and
   "planet.nm". It has the following differences:
