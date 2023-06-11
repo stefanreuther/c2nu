@@ -94,7 +94,7 @@
 #  Since the server usually sends gzipped data, this script needs the
 #  'gzip' program in the path to decompress it.
 #
-#  (c) 2011-2012,2016,2017 Stefan Reuther 
+#  (c) 2011-2012,2016,2017 Stefan Reuther
 #      2023 with additions by Quapla for VPA
 #
 use strict;
@@ -103,11 +103,12 @@ use IO::Handle;
 use IO::Socket;
 use bytes;              # without this, perl 5.6.1 doesn't correctly read Unicode stuff
 
-my $VERSION = "0.4.4";
+my $VERSION = "0.4.5";
 my $opt_rootDir = "/usr/share/planets";
 my $opt_rst = "c2rst.txt";
 my $opt_trn = "c2trn.txt";
 my $USE_Hulls = 220;
+my $USE_Planets = 510;
 
 # Initialisation
 stateSet('api', 'api.planets.nu');
@@ -532,9 +533,9 @@ sub makeAllSpecFiles {
     makeSpecFile($parsedReply->{rst}{hulls}, "hullspec.dat", $USE_Hulls, "A30v15", 60,
                  qw(name zzimage zzunused tritanium duranium molybdenum fueltank
                     crew engines mass techlevel cargo fighterbays launchers beams cost));
-    makeSpecFile($parsedReply->{rst}{planets}, "xyplan.dat", 500, "v3", 6,
+    makeSpecFile($parsedReply->{rst}{planets}, "xyplan.dat", $USE_Planets, "v3", 6,
                  qw(x y ownerid));
-    makeSpecFile($parsedReply->{rst}{planets}, "planet.nm", 500, "A20", 20,
+    makeSpecFile($parsedReply->{rst}{planets}, "planet.nm", $USE_Planets, "A20", 20,
                  qw(name));
 
     # Make more spec files
@@ -551,13 +552,13 @@ sub makeSpecFile {
     my $packPattern = shift;
     my $entrySize = shift;
     my @fields = @_;
-	my $count = 0;
-	my $countID = 0;
-	my $HullID;
-	
-	print "Making $fileName...\n";
-	
-        # Build field-to-slot mapping and entry template
+    my $count = 0;
+    my $countID = 0;
+    my $HullID;
+
+    print "Making $fileName...\n";
+
+    # Build field-to-slot mapping and entry template
     my %fieldToSlot;
     my @entryTemplate;
     foreach (0 .. $#fields) {
@@ -569,44 +570,44 @@ sub makeSpecFile {
     my @file;
     if ($fileName eq 'xyplan.dat') {
         # do NOT create xyplan.dat from original, it is expected to have holes!
-        foreach (1 .. $numEntries) {			
+        foreach (1 .. $numEntries) {
             push @file, [0,0,0];
         }
     } elsif ($fileName eq 'hullspec.dat') {
-		# If hullsepc.dat exists fill hulls > 105 with empty pics, otherwise use all empty pics
-		if (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
-			binmode FILE;
-			foreach (1 .. 105) {
-				my $buf;
-				read FILE, $buf, $entrySize;
-				push @file, [unpack $packPattern, $buf];
-			}
-			close FILE;
-			if ($numEntries > 105)  {
-				print "WARNING: 'hullspec.dat' hulls 106 to $numEntries created from scratch; it will not contain image references.\n";
-				foreach (106 .. $numEntries) {
-					if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
-					push @file, [@entryTemplate];
-				}
-			}
-		} else {
+        # If hullsepc.dat exists fill hulls > 105 with empty pics, otherwise use all empty pics
+        if (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
+            binmode FILE;
+            foreach (1 .. 105) {
+                my $buf;
+                read FILE, $buf, $entrySize;
+                push @file, [unpack $packPattern, $buf];
+            }
+            close FILE;
+            if ($numEntries > 105)  {
+                print "WARNING: 'hullspec.dat' hulls 106 to $numEntries created from scratch; it will not contain image references.\n";
+                foreach (106 .. $numEntries) {
+                    if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
+                    push @file, [@entryTemplate];
+                }
+            }
+        } else {
             print "WARNING: 'hullspec.dat' created from scratch; it will not contain image references.\n";
             print "    Copy a pre-existing 'hullspec.dat' into this directory and process the RST again\n";
             print "    to have images.\n";
-			foreach (1 .. $numEntries) {
-				if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
-				push @file, [@entryTemplate];
-			}
-		}
-    } elsif	(open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
+            foreach (1 .. $numEntries) {
+                if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
+                push @file, [@entryTemplate];
+            }
+        }
+    } elsif (open(FILE, "< $fileName") || open(FILE, "< $opt_rootDir/$fileName")) {
         binmode FILE;
         foreach (1 .. $numEntries) {
             my $buf;
             read FILE, $buf, $entrySize;
             push @file, [unpack $packPattern, $buf];
         }
-		close FILE;
-	} else {
+        close FILE;
+    } else {
         foreach (1 .. $numEntries) {
             if (exists $fieldToSlot{name}) { $entryTemplate[$fieldToSlot{name}] = "#$_"; }
             push @file, [@entryTemplate];
@@ -614,46 +615,51 @@ sub makeSpecFile {
     }
 
     # Populate file
-	if ($fileName eq 'hullspec.dat') {
-		$count = 0;
-		$countID = 105;
-		if ($numEntries>$USE_Hulls)  {
-			print "VPA V3.80 Can handle max. $USE_Hulls Shiphulls (yet) - contact VPA-Crew to fix\n";
-		}
-		foreach my $e (@$replyPart) {		
-			$count += 1;			
-			# now VPA can handle all 220 shiphulls
-			if (($e->{id} > 0) && ($countID <= $numEntries)) {
-				if ($e->{id} <= 105) {
-					$HullID = $e->{id}
-				} else {
-					# Map ID > 105					
-					$countID += 1;
-					stateSet($e->{id}, $countID);
-					$HullID = $countID;
-					print "ID $e->{id} is $e->{name} as NEWHull $countID done\n";					
-				}			
-				foreach (sort keys %$e) {
-					if (exists $fieldToSlot{$_}) {
-						$file[$HullID - 1][$fieldToSlot{$_}] = $e->{$_};
-						#print "ID $e->{id} is $e->{name} as NEWHull $HullID done\n";					
-					}
-				} 
-			}
-		}		
-	} else {
-		# Populate other files
-		foreach my $e (@$replyPart) {
-			if ($e->{id} > 0 && $e->{id} <= $numEntries) {
-				foreach (sort keys %$e) {
-					if (exists $fieldToSlot{$_}) {
-						$file[$e->{id} - 1][$fieldToSlot{$_}] = $e->{$_};
-					}
-				}
-			}
-		}
-	}
-			
+    if ($fileName eq 'hullspec.dat') {
+        $count = 0;
+        $countID = 105;
+        if ($numEntries>$USE_Hulls)  {
+            print "VPA V3.80 Can handle max. $USE_Hulls Shiphulls (yet) - contact VPA-Crew to fix\n";
+        }
+        foreach my $e (@$replyPart) {
+            $count += 1;
+            # now VPA can handle all 220 shiphulls
+            if (($e->{id} > 0) && ($countID <= $numEntries)) {
+                if ($e->{id} <= 105) {
+                    $HullID = $e->{id}
+                } else {
+                    # Map ID > 105
+                    $countID += 1;
+                    stateSet($e->{id}, $countID);
+                    $HullID = $countID;
+                    #print "ID $e->{id} is $e->{name} as NEWHull $countID done\n";
+                }
+                foreach (sort keys %$e) {
+                    if (exists $fieldToSlot{$_}) {
+                        $file[$HullID - 1][$fieldToSlot{$_}] = $e->{$_};
+                        #print "ID $e->{id} is $e->{name} as NEWHull $HullID done\n";
+                    }
+                }
+            }
+        }
+    } else {
+        # Populate other files
+        my $ii = 1;
+        foreach my $e (@$replyPart) {
+            if ($fileName eq 'xyplan.dat') {              
+              $ii += 1;
+            }
+            if ($e->{id} > 0 && $e->{id} <= $numEntries) {
+                foreach (sort keys %$e) {
+                    if (exists $fieldToSlot{$_}) {
+                        $file[$e->{id} - 1][$fieldToSlot{$_}] = $e->{$_};
+                    }
+                }
+            }
+        }
+        if ($ii > $USE_Planets) {print "WARNING: VPA V3.81 handles only $USE_Planets planets - contact author\n"; }
+    }
+
     # Generate it
     open FILE, "> $fileName" or die "$fileName: $!\n";
     binmode FILE;
@@ -690,7 +696,7 @@ sub makeHullfuncFile {
 sub makeTruehullFile {
     my $pRacehulls = shift;
     my $player = shift;
-	my $HullID;
+    my $HullID;
 
     print "Making truehull.dat...\n";
 
@@ -707,11 +713,11 @@ sub makeTruehullFile {
     # Merge race hulls
     for (my $i = 0; $i < 20; ++$i) {
         $truehull[($player-1)*20 + $i] = ($i < @$pRacehulls ? $pRacehulls->[$i] : 0);
-		# Map ID > 105
-		if (($truehull[($player-1)*20 + $i]) > 105) {
-			$truehull[($player-1)*20 + $i] = stateGet(($truehull[($player-1)*20 + $i]));
-			print "Hull $pRacehulls->[$i] transformed to $truehull[($player-1)*20 + $i]\n";
-		}
+        # Map ID > 105
+        if (($truehull[($player-1)*20 + $i]) > 105) {
+            $truehull[($player-1)*20 + $i] = stateGet(($truehull[($player-1)*20 + $i]));
+            print "Hull $pRacehulls->[$i] transformed to $truehull[($player-1)*20 + $i]\n";
+        }
     }
 
     # Write
@@ -855,13 +861,26 @@ sub makeUtilData {
         # Only current fields. Old fields are managed by PCC.
         if ($_->{infoturn} == $parsedReply->{rst}{settings}{turn}) {
             # ignored fields: friendlycode, radius
-            utilWrite(0, pack("vvvvVv",
+            utilWrite(0, pack("vvvvVvvv",
                               $_->{id},
                               $_->{x},
                               $_->{y},
                               rstMapOwnerToRace($parsedReply, $_->{ownerid}),
                               $_->{units},
-                              $_->{isweb} ? 1 : 0));
+                              $_->{isweb} ? 1 : 0,
+                              0, 2));
+#                              $_->{isweb} ? 1 : 0)); Still not sure about this, Quapla 26.2.23 - I will check this                              
+        }
+    }
+    
+    # Targets
+    foreach my $ship (@{$parsedReply->{rst}{ships}}) {
+        if ($ship->{ownerid} != $player) {
+            if ($ship->{hullid} > 105) {
+              print "makeUtilData:  Ship $ship->{id} mit hull $ship->{hullid} already patched\n"; 
+            } #Patch ship's hullid            
+            utilWrite(10, pack("v7A20", $ship->{id}, rstMapOwnerToRace($parsedReply, $ship->{ownerid}),
+                          $ship->{warp}, $ship->{x}, $ship->{y}, $ship->{hullid}, $ship->{heading}, $ship->{name}));
         }
     }
 
@@ -873,7 +892,51 @@ sub makeUtilData {
             utilWrite(11, pack("vv", $base->{planetid}, rstMapOwnerToRace($parsedReply, $baseOwner)));
         }
     }
+    
+    # Allied Planets
+    # Since we're getting all planets, we must filter here
+    foreach my $planet (@{$parsedReply->{rst}{planets}}) {
+        next if $planet->{ownerid} == $player || $planet->{ownerid} == 0 ;
+        utilWrite(12, pack("v5V8", $planet->{id}, $planet->{ownerid}, $planet->{temp}, $planet->{nativetype}, 
+        $planet->{nativegovernment}, $planet->{nativeclans}*100, $planet->{neutronium}, $planet->{tritanium},
+        $planet->{duranium}, $planet->{molybdenum}, $planet->{clans}*100, $planet->{supplies},$planet->{megacredits} ));
+    }
+    #    --- Type 12 (allied planet) ---
+    # +0     WORD    Planet Id
+    # +2     WORD    Owner
+    # +4     WORD    Temperature (0-100, actual value, not 100-F)
+    # +6     WORD    Native race
+    # +8     WORD    Native government
+    #+10     DWORD   Natives (number of natives, not clans!)
+    #+14   4 DWORDs  Mined minerals (N,T,D,M)
+    #+30     DWORD   Colonists (number of colonists, not clans!)
+    #+34     DWORD   Supplies
+    #+38     DWORD   Money
 
+    foreach my $stars (@{$parsedReply->{rst}{stars}}) {
+        utilWrite(33, pack("v7A20A20A20v", $stars->{id}, $stars->{x}, $stars->{y}, 1, $stars->{radius}, 0, 0,
+                      $stars->{name}, "Radius:", pack('L', $stars->{radius}), 0));
+        utilWrite(33, pack("v7A20A20A20v", $stars->{id}, $stars->{x}, $stars->{y}, 2, int(sqrt($stars->{mass}) + 0.5), 0, 0,
+                      $stars->{name}, "Mass:", pack('L', $stars->{mass}), 0));
+                      
+    }
+    # UFO - Nebula / Asteriods etc...
+    #--- Type 33 (General Object) [PHost 2.10+] ---
+    # +0     WORD    Id (Ufo Id, or bigger than 1000 if there isn't a matching
+    #                Ufo record)
+    # +2     WORD    X
+    # +4     WORD    Y
+    # +6     WORD    Color
+    # +8     WORD    Radius
+    #+10     WORD    Speed
+    #+12     WORD    Heading
+    #+14  20 BYTEs   Name
+    #+34  20 BYTEs   Info 1
+    #+54  20 BYTEs   Info 2
+    #+74     WORD    Type code
+    #+76   n BYTEs   optional additional information
+
+    
     # TODO: explosions. Problem is that PCC2 cannot yet display those.
     # TODO: enemy planet scans
 
@@ -1023,10 +1086,10 @@ sub doUnpack {
 
     # Make util.dat with assorted info
     makeUtilData($parsedReply, $parsedReply->{rst}{player}{id}, $timestamp);
-	
-	# Set VPA Files: VPAADDON.INI + MAP.INI
-	makeVPAfiles($parsedReply);
-	
+
+    # Set VPA Files: VPAADDON.INI + MAP.INI
+    makeVPAfiles($parsedReply);
+
     # Log failed flows
     unpLogFailedFlows($pAdjust);
 }
@@ -1234,7 +1297,7 @@ sub unpPackBases {
         # Missions
         $dat .= pack("v3", $base->{targetshipid}, $base->{shipmission}, $base->{mission});
         $dis .= pack("v3", 0,                     0,                    $base->{mission});
-
+        #print ("unpack Base: $base->{planetid}, Mission: $base->{mission}, ShipMission: $base->{shipmission}, ShipTarget: $base->{targetshipid}, Mission1Target $base->{mission1target} \n");
         # Build order
         my $buildSlot = 0;
         if ($base->{isbuilding}) {
@@ -1282,12 +1345,12 @@ sub unpPackPlanets {
                     nativeclans
                     nativetype);
     # NoSupplies -> different Structure Costs - Avoiding Flow-Error while unpacking, Quapla 8.2.23
-	# Todo: Parse unlimitedfuel, unlimitedammo, nowarpwells for VPA support, too
-	my @structCosts = (4, 3, 10);
-	if ($parsedReply->{rst}{settings}{nosupplies}) {
-		@structCosts = (5, 4, 11);
-	} 
-	
+    # Todo: Parse Torpedos made, unlimitedfuel, unlimitedammo, nowarpwells for VPA support, too
+    my @structCosts = (4, 3, 10);
+    if ($parsedReply->{rst}{settings}{nosupplies}) {
+        @structCosts = (5, 4, 11);
+    }
+
     foreach my $planet (@{$parsedReply->{rst}{planets}}) {
         if ($planet->{friendlycode} ne '???' || grep {$planet->{$_} > 0} @fields) {
             # Flow tracking
@@ -1332,7 +1395,7 @@ sub unpPackPlanets {
                 $dat .= pack("V", $planet->{clans});
                 $dis .= pack("V", $planet->{clans});
 
-                # Supplies and MC
+                # Supplies and MC Quapla Handle Nosupplies here, done 18.3.23
                 my $newMC = $planet->{megacredits};
                 my $oldMC = $planet->{megacredits} - $planet->{suppliessold};
                 my $newSup = $planet->{supplies};
@@ -1340,7 +1403,11 @@ sub unpPackPlanets {
 
                 $oldSup = unpAdjustUse($oldSup, $pAdjust, $adjkey, "suppliesUsed");
                 $oldMC  = unpAdjustUse($oldMC,  $pAdjust, $adjkey, "cashUsed");
-
+                if ($parsedReply->{rst}{settings}{nosupplies}) {
+                  $oldMC += $oldSup;
+                  $oldSup = 0;
+                  #print "Planet: $planet->{id} - oldSup: $oldSup - oldMC: $oldMC\n";
+                }
                 if ($oldMC < 0) {
                     $pAdjust->{$adjkey}{cashMade} -= $oldMC;
                     $oldMC = 0;
@@ -1388,10 +1455,11 @@ sub unpPackShips {
     my @dis;
 
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
-		if ($ship->{hullid} > 105) {
-			print "unpPackShips: Ship $ship->{hullid} patched to";
-			$ship->{hullid} = stateGet($ship->{hullid});
-			print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
+        if ($ship->{hullid} > 105) {
+            print "unpPackShips:  Ship $ship->{id} mit hull $ship->{hullid} patched to";  #Patch ship's hullid
+            $ship->{hullid} = stateGet($ship->{hullid});
+            print " hull $ship->{hullid}\n";
+        } #Patch ship's hullid
         if ($ship->{ownerid} == $player) {
             # Flow tracking
             my $adjkey = $ship->{x} . "," . $ship->{y} . " Ship ID " . $ship->{ownerid};
@@ -1408,21 +1476,7 @@ sub unpPackShips {
             $dat .= rstPackFields($ship,
                                   "v8",
                                   qw(x y engineid hullid beamid beams bays torpedoid));
-						 
-#            $dat .= rstPackFields($ship,
-#                                  "v3",
-#                                  qw(x y engineid));
-#			# Map HullID > 105
-#			if ($ship->{hullid} <= 105) {
-#				$dat .= pack("v",$ship->{hullid});
-#			} else {
-#				$dat .= pack("v",stateGet($ship->{hullid}));
-#				print "Ship $ship->{hullid} unpacked to stateGet($ship->{hullid})";
-#			}
-#			$dat .= rstPackFields($ship,
-#                                  "v4",
-#                                  qw(beamid beams bays torpedoid));
-								  
+
             my $dis = $dat;
 
             # Ammo
@@ -1442,15 +1496,31 @@ sub unpPackShips {
             $dis .= pack("v", $ship->{torps});
 
             # Mission
+            # Quapla Check Unload Money here
+            # Plan: If Unload mission += 900 - mission1target += tranfermc - Not for Tow Mission!
+            # $ship->{transfertargettype} 1= unload 2=transfer 3=jettissson - need to check?
             my $msn;
+            my $addmission = 0;
+            my $addtarget = 0;
+            if ($ship->{mission} > 20) {
+              print ("unpPackShips:  Ship $ship->{id} mit hull $ship->{hullid} Mission: $ship->{mission} Target: $ship->{mission1target} \n");
+            }
+            if (($ship->{transfermegacredits} > 0) && ($ship->{mission} != 6) &&
+                $parsedReply->{rst}{settings}{directtransfermc}) {
+                $addmission = 900;
+                $addtarget = $ship->{transfermegacredits};
+                print "WARNING VPA 3.81 feature: Ship: $ship->{id} mission $ship->{mission} transfered megacredits: $addtarget\n";
+            }
+            
             if ($ship->{mission} >= 0) {
                 # Missions are off-by-one!
-                $msn = pack("v", $ship->{mission} + 1);
+                $msn = pack("v", $ship->{mission} + 1 + $addmission);
             } else {
                 $msn = pack("v", $ship->{mission});
             }
             $msn .= pack("v", rstMapOwnerToRace($parsedReply, $ship->{enemy}));
-            $msn .= pack("v", $ship->{mission} == 6 ? $ship->{mission1target} : 0);
+            $msn .= pack("v", $ship->{mission} == 6 ? $ship->{mission1target} : $addtarget);
+            
             $dat .= $msn;
             $dis .= $msn;
 
@@ -1470,53 +1540,30 @@ sub unpPackShips {
             # FIXME: jettison?
             if ($ship->{transfertargettype} == 1) {
                 # Unload
-				#Adddition for new VPA V3.80 client (25th Anniversary)
-				if ($parsedReply->{rst}{settings}{nosupplies} && 
-				    $parsedReply->{rst}{settings}{directtransfermc}) {
-					$dat .= rstPackFields($ship,
-                                      "v7",
-                                      qw(transferneutronium transfertritanium
-                                         transferduranium transfermolybdenum
-                                         transferclans transfermegacredits
-                                         transfertargetid));
-				} else {
-					$dat .= rstPackFields($ship,
-                                      "v7",
-                                      qw(transferneutronium transfertritanium
-                                         transferduranium transfermolybdenum
-                                         transferclans transfersupplies
-                                         transfertargetid));
-				}
+                #Adddition for new VPA V3.80 client (30th Anniversary)
+                $dat .= rstPackFields($ship,"v7", qw(transferneutronium transfertritanium
+                        transferduranium transfermolybdenum transferclans transfersupplies
+                        transfertargetid));                
             } elsif ($ship->{transfertargettype} == 3) {
                 # Jettison
                 $dat .= rstPackFieldsJet($ship,
-                                      "v7",
-                                      qw(transferneutronium transfertritanium
-                                         transferduranium transfermolybdenum
-                                         transferclans transfersupplies));
-                 print "WARNING: Jettison experimantal\n";
+                                         "v7",
+                                         qw(transferneutronium transfertritanium
+                                            transferduranium transfermolybdenum
+                                            transferclans transfersupplies));
+                print "WARNING: Jettison experimantal\n";
             } else {
                 $dat .= "\0" x 14;
             }
             $dis .= "\0" x 14;
             if ($ship->{transfertargettype} == 2) {
                 # Transfer
-				if ($parsedReply->{rst}{settings}{nosupplies} && 
-				    $parsedReply->{rst}{settings}{directtransfermc}) {
-					$dat .= rstPackFields($ship,
-                                      "v7",
-                                      qw(transferneutronium transfertritanium
-                                         transferduranium transfermolybdenum
-                                         transferclans transfermegacredits
-                                         transfertargetid));
-				} else {
-					$dat .= rstPackFields($ship,
+                $dat .= rstPackFields($ship,
                                       "v7",
                                       qw(transferneutronium transfertritanium
                                          transferduranium transfermolybdenum
                                          transferclans transfersupplies
-                                         transfertargetid));
-				}
+                                         transfertargetid));                
             } else {
                 $dat .= "\0" x 14;
             }
@@ -1532,19 +1579,12 @@ sub unpPackShips {
             $dis .= $msn;
 
             # Cash
+            if ($ship->{megacredits} >= 65536) {
+              print "WARNING VPA handles max 65K cash: Ship: $ship->{id} has $ship->{megacredits} megacredits. Do not alter.\n";
+            }
             my $newMC = $ship->{megacredits};
             my $oldMC = unpAdjustUse($newMC, $pAdjust, $adjkey, "cashUsed");
             $oldMC = unpAdjustConsume($oldMC, $pAdjust, $adjkey, "cashMade");
-            if ($ship->{transfermegacredits} || $ship->{transferammo}) {
-				if ($parsedReply->{rst}{settings}{nosupplies}) {
-					print "WARNING: transfer of $ship->{transfermegacredits} MC / $ship->{transferammo} ammo from Ship-ID $ship->{id} only for VPA V3.80 yet\n";
-				} else {
-					print  "WARNING: transfer of $ship->{transfermegacredits} MC / $ship->{transferammo} ammo from Ship-ID $ship->{id} not possible yet\n";
-					$pAdjust->{$adjkey}{$newMC} += $ship->{transfermegacredits} ;
-					$pAdjust->{$adjkey}{$newMC} += $ship->{transferammo} ;
-				}
-			}
-
 
             $dat .= pack("v", $newMC);
             $dis .= pack("v", $oldMC);
@@ -1654,8 +1694,7 @@ sub unpLogFailedFlows {
         printf "WARNING: %d flows not resolved, see c2flow.txt.\n\n%s\n", scalar(@log), @log;
         open LOG, "> c2flow.txt" or die "c2flow.txt: $!\n";
         print LOG @log;
-		close LOG;
-		
+        close LOG;
     } else {
         unlink "c2flow.txt";
     }
@@ -1668,40 +1707,43 @@ sub unpLogFailedFlows {
 ######################################################################
 
 sub makeVPAfiles{
-	my $parsedReply = shift;
-	my $sizew = $parsedReply->{rst}{settings}{mapwidth};
-	my $sizeh = $parsedReply->{rst}{settings}{mapheight};
-	my $sphere = $parsedReply->{rst}{settings}{sphere};
-	my $unlimitedfuel = $parsedReply->{rst}{settings}{unlimitedfuel};
-	my $unlimitedammo = $parsedReply->{rst}{settings}{unlimitedammo};
-	my $nosupplies = $parsedReply->{rst}{settings}{nosupplies};
-	my $DirectTransferAmmo  = $parsedReply->{rst}{settings}{directtransferammo};
-	my $DirectTransferMC  = $parsedReply->{rst}{settings}{directtransfermc};
-	if ($sizew == $sizeh) {						# only square maps supported
-		print "Updating MAP.INI...\n";
-		stateVPA('MAP', 'Size', $sizew + 20 );  # Need for correct work
-	}
-	#stateSet('sphere', $sphere);
-	stateVPA('MAP', 'Wrap', $sphere ? "Yes" : "No"); # Wrap?
-	#stateSet('unlimitedfuel', $unlimitedfuel);
-	#stateSet('unlimitedammo', $unlimitedammo);
-	#stateSet('nosupplies', $nosupplies);
-	print "Updating VPAADDON.INI...\n";
-	stateVPA('VPAADDON', 'NU', "Yes");
-	stateVPA('VPAADDON', 'NU-UnlimitedFuel', $unlimitedfuel ? "Yes" : "No");
-	stateVPA('VPAADDON', 'NU-UnlimitedAmmo', $unlimitedammo ? "Yes" : "No");
-	stateVPA('VPAADDON', 'NU-NoSupplies', $nosupplies ? "Yes" : "No");
-	stateVPA('VPAADDON', 'NU-DirectTransferAmmo', $DirectTransferAmmo ? "Yes" : "No");
-	stateVPA('VPAADDON', 'NU-DirectTransferMC', $DirectTransferMC ? "Yes" : "No");
+    my $parsedReply = shift;
+    my $sizew = $parsedReply->{rst}{settings}{mapwidth};
+    my $sizeh = $parsedReply->{rst}{settings}{mapheight};
+    my $sphere = $parsedReply->{rst}{settings}{sphere};
+    my $unlimitedfuel = $parsedReply->{rst}{settings}{unlimitedfuel};
+    my $unlimitedammo = $parsedReply->{rst}{settings}{unlimitedammo};
+    my $nosupplies = $parsedReply->{rst}{settings}{nosupplies};
+    my $DirectTransferAmmo  = $parsedReply->{rst}{settings}{directtransferammo};
+    my $DirectTransferMC  = $parsedReply->{rst}{settings}{directtransfermc};
+    my $NuIonStorms = $parsedReply->{rst}{settings}{nuionstorms};
+    if ($sizew == $sizeh) {						# only square maps supported
+        print "Updating MAP.INI...\n";
+        stateVPA('MAP', 'Size', $sizew + 20 );  # Need for correct work
+    }
+    #stateSet('sphere', $sphere);
+    stateVPA('MAP', 'Wrap', $sphere ? "Yes" : "No"); # Wrap?
+    #stateSet('unlimitedfuel', $unlimitedfuel);
+    #stateSet('unlimitedammo', $unlimitedammo);
+    #stateSet('nosupplies', $nosupplies);
+    print "Updating VPAADDON.INI...\n";
+    stateVPA('VPAADDON', 'NU', "Yes");
+    stateVPA('VPAADDON', 'NU-UnlimitedFuel', $unlimitedfuel ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-UnlimitedAmmo', $unlimitedammo ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-NoSupplies', $nosupplies ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-DirectTransferAmmo', $DirectTransferAmmo ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-DirectTransferMC', $DirectTransferMC ? "Yes" : "No");
+    stateVPA('VPAADDON', 'NU-NuIonStorms', $NuIonStorms ? "Yes" : "No");
 }
+
 ### Open VPA-Inifile
 sub stateVPA {
-	my $file = shift;
-	my $key = shift;
-	my $val = shift;
-	my $found = 0;
-	my $host = 0;
-	
+    my $file = shift;
+    my $key = shift;
+    my $val = shift;
+    my $found = 0;
+    my $host = 0;
+
     # Copy existing file, updating it
     open(OUT, "> $file.new") or die "ERROR: cannot create new state file $file.c2u: $!\n";
     if (open(STATE, "< $file.ini")) {
@@ -1709,23 +1751,23 @@ sub stateVPA {
             s/[\r\n]*$//;
             if (/^ *#/ || /^ *$/) {						# Kommentar oder Leerzeile
                 print OUT "$_\n";
-            } elsif (/^(.*?)\s+=\s+(.*)/ && ($key eq $1)) { 
+            } elsif (/^(.*?)\s+=\s+(.*)/ && ($key eq $1)) {
                 print OUT "$key = ", stateQuote($val), "\n";
-				$found = 1;
+                $found = 1;
             } else {
                 print OUT "$_\n";
             }
-			if ("$_" eq "[HOST]") { $host = 1; }
+            if ("$_" eq "[HOST]") { $host = 1; }
         }
         close STATE;
     }
 
     # Print missing keys
-	if (!$host && ($file eq "VPAADDON")) {
-		print OUT "[HOST]\n";
-	}
-	if (!$found) {
-		print OUT "$key = ", stateQuote($val), "\n";
+    if (!$host && ($file eq "VPAADDON")) {
+        print OUT "[HOST]\n";
+    }
+    if (!$found) {
+        print OUT "$key = ", stateQuote($val), "\n";
     }
     close OUT;
 
@@ -1734,7 +1776,7 @@ sub stateVPA {
     rename "$file.ini", "$file.bak";
     rename "$file.new", "$file.ini" or print "WARNING: cannot rename new state file: $!\n";
 }
-	
+
 
 ######################################################################
 #
@@ -1819,7 +1861,7 @@ sub doServe {
                || $data =~ s/\A\s*\n//sg
                || $data =~ s/\Avar\s+\S+\s*=\s*//sg)
         { }
-        
+
         my $rst = jsonParse($data);
         my $id = $rst->{rst}{game}{id};
         if (!$id) {
@@ -1957,6 +1999,23 @@ sub utilWrite {
     print UTIL pack("vv", $type, length($data)), $data;
 }
 
+#--- Type 51 (Player Score) [PHost 3.4d / 4.0+] ---
+# +0  50 BYTEs   Name; player-readable description of this score.
+#+50     WORD    Identifier
+#                 1      Per-game Score. This is intended to be used by
+#                        the "main" scoring program in use for this game
+#                        to report "the score".
+#                 2      Build points (PAL / PBP)
+#                 3      Minefields allowed
+#                 4      Minefields laid
+#                 5..99  reserved
+#                 100+   available
+#                 1000   (c2nu) Military Score
+#                 1001   (c2nu) Inventory Score
+#+52     WORD    Turns-over-limit required to win, -1 if not known.
+#+54     DWORD   Win limit, -1 if none
+#+58  11 DWORDs  Scores for each player. -1 if not known.
+
 sub utilMakeScore {
     my ($parsedReply, $key, $utilId, $utilName) = @_;
     my @scores = replicate(11, -1);
@@ -2004,13 +2063,17 @@ sub rstPackShips {
     my $parsedReply = shift;
     my $player = shift;
     my @packedShips;
-	#my $HullID;
-	
+    #my $HullID;
+    my $addmission = 0;
+    my $addtarget = 0;
+
+
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
-		if ($ship->{hullid} > 105) {
-			print "rstPackShips: Ship $ship->{hullid} patched to";
-			$ship->{hullid} = stateGet($ship->{hullid});
-			print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
+        if ($ship->{hullid} > 105) {
+            print "rstPackShips: Ship $ship->{id} with hull $ship->{hullid} patched to";  #Patch ship's hullid
+            $ship->{hullid} = stateGet($ship->{hullid});
+            print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
+            
         if ($ship->{ownerid} == $player) {
             my $p = rstPackFields($ship, "v", qw(id));
             $p .= pack("v", rstMapOwnerToRace($parsedReply, $ship->{ownerid}));
@@ -2023,34 +2086,39 @@ sub rstPackShips {
             $p .= rstPackFields($ship,
                                 "v10",
                                 qw(x y engineid hullid beamid beams bays torpedoid ammo torps));
-					   
-#            $p .= rstPackFields($ship,
-#                                "v3",
-#                                qw(x y engineid));
-#			# Map HullID > 105
-#			if ($ship->{hullid} <= 105) {
-#				$p .= pack("v",$ship->{hullid});
-#			} else {
-#				$HullID = stateGet($ship->{hullid});
-#				$p .= pack("v", $HullID);
-#				print "Ship $ship->{hullid} unpacked to $HullID\n";
-#			}
-#            $p .= rstPackFields($ship,
-#                                "v6",
-#                                qw(beamid beams bays torpedoid ammo torps));
-#			
+
+            # Mission
+            # Quapla Check Unload Money here
+            # Plan: If Unload mission += 900 - mission1target += tranfermc - Not for Tow Mission!
+            # $ship->{transfertargettype} 1= unload 2=transfer 3=jettissson - need to check?
+            $addmission = 0;
+            $addtarget = 0;
+
+            if (($ship->{transfermegacredits} > 0) && ($ship->{mission} != 6) &&
+                $parsedReply->{rst}{settings}{directtransfermc}) {
+                $addmission = 900;
+                $addtarget = $ship->{transfermegacredits};
+                print "WARNING VPA 3.81 feature: Ship: $ship->{id} extended mission transfer megacredits: $addtarget\n";
+            }
+            
             if ($ship->{mission} >= 0) {
                 # Missions are off-by-one!
-                $p .= pack("v", $ship->{mission} + 1);
+                $p .= pack("v", $ship->{mission} + 1 + $addmission);
             } else {
                 $p .= pack("v", $ship->{mission});
             }
             $p .= pack("v", rstMapOwnerToRace($parsedReply, $ship->{enemy}));
-            $p .= pack("v", $ship->{mission} == 6 ? $ship->{mission1target} : 0);
+            $p .= pack("v", $ship->{mission} == 6 ? $ship->{mission1target} : $addtarget);
+#           Set Ship names to Hullname -> make a switch for it?
+#            my $newname = gethullname($parsedReply, $ship->{hullid});
+#            $p .= rstPackFields($ship, "v3", qw(damage crew clans));
+#            $p .= pack("A20", $newname);
+#            $p .= rstPackFields($ship, "v5", qw(neutronium tritanium duranium molybdenum supplies));
             $p .= rstPackFields($ship,
                                 "v3A20v5",
                                 qw(damage crew clans name
                                    neutronium tritanium duranium molybdenum supplies));
+
 
             # FIXME: jettison?
             if ($ship->{transfertargettype} == 1) {
@@ -2082,10 +2150,13 @@ sub rstPackShips {
             } else {
                 $p .= "\0" x 14;
             }
-            if ($ship->{transfermegacredits} || $ship->{transferammo}) {
-                print "WARNING: transfer of mc and/or ammo not implemented yet\n";
+
+            $p .= pack("v", $ship->{mission} ==   7 ? $ship->{mission1target} : 
+                            $ship->{mission} == 907 ? $ship->{mission1target} : 0);
+
+            if ($ship->{megacredits} >= 65536) {
+              print "WARNING VPA handles max 65K cash: Ship: $ship->{id} has $ship->{megacredits} megacredits. Do not alter.\n";
             }
-            $p .= pack("v", $ship->{mission} == 7 ? $ship->{mission1target} : 0);
             $p .= rstPackFields($ship,
                                 "v",
                                 qw(megacredits));
@@ -2102,12 +2173,9 @@ sub rstPackTargets {
     my $player = shift;
     my @packedShips;
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
-		if ($ship->{hullid} > 105) {
-			#print "rstPackTargets: Ship $ship->{hullid} patched to";
-			#$ship->{hullid} = stateGet($ship->{hullid});
-			#print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
-			print "rstPackTargets:  Ship $ship->{hullid} already patched\n"; } #Patch ship's hullid
-		if ($ship->{ownerid} != $player) {
+        if ($ship->{hullid} > 105) {
+            print "rstPackTargets:  Ship $ship->{id} mit hull $ship->{hullid} already patched\n"; } #Patch ship's hullid
+        if ($ship->{ownerid} != $player) {
             push @packedShips,
               rstPackFields($ship, "v", qw(id))
                 . pack("v", rstMapOwnerToRace($parsedReply, $ship->{ownerid}))
@@ -2234,6 +2302,30 @@ sub rstPackMessages {
                      "(-9%04d)<<< Sub Space Message >>>",   # xx 21 'Hiss'
                 );
 
+	# CutScenes
+	if (exists $parsedReply->{rst}{cutscenes}) {
+		foreach (@{$parsedReply->{rst}{cutscenes}}) {
+			$text = "(-m0000)<<< Cut Scenes >>>\n\n",
+			$text .= $_->{title}."\n\n";
+			$text .= rstFormatMessage($_->{text});
+			push @result, rstEncryptMessage($text);		
+		}
+	}
+	
+    # LevelTask
+    if (exists $parsedReply->{rst}{leveltasks}) {
+        foreach (@{$parsedReply->{rst}{leveltasks}}) {
+            $text = "(-m0001)<<< ";
+            if ($parsedReply->{rst}{leveltaskschanged}) {
+                $text .= "NEW ";
+            }
+            $text .= "Level Tasks >>>\n\n",
+            $text .= $_->{tag}.":\n";
+            $text .= rstFormatMessage($_->{text});
+            push @result, rstEncryptMessage($text);		
+        }
+    }
+
     # Build message list
     # 'messages' is regular inbox
     # 'mymessages' is diplomacy messages and outbox since 23/Nov/2011.
@@ -2309,8 +2401,49 @@ sub rstPackMessages {
 
         push @result, rstEncryptMessage($text);
     }
-
+    
+    # Scores
+    $text = MsgMakeScore($parsedReply, "militaryscore", "militarychange", 1000, "Military Score (Nu)");
+    push @result, rstEncryptMessage($text);
+    $text = MsgMakeScore($parsedReply, "inventoryscore", "inventorychange", 1001, "Inventory Score (Nu)");
+    push @result, rstEncryptMessage($text);
+    $text = MsgMakeScore($parsedReply, "prioritypoints", "prioritypointchange",   2, "Build Points (Nu)");
+    push @result, rstEncryptMessage($text);
+    
     @result;
+}
+
+sub MsgMakeScore {
+    my ($parsedReply, $key, $keychg, $utilId, $utilName) = @_;
+    my @scores = replicate(11, -1);
+    my @change = replicate(11, -1);
+    my @player = replicate(11, "");
+    my $Racename = "";
+    my $plus = "";
+    foreach my $score (@{$parsedReply->{rst}{scores}}) {
+        $scores[rstMapOwnerToRace($parsedReply, $score->{ownerid})] = $score->{$key};
+        $change[rstMapOwnerToRace($parsedReply, $score->{ownerid})] = $score->{$keychg};
+        $player[rstMapOwnerToRace($parsedReply, $score->{ownerid})] = rstMapOwnerToPlayer($parsedReply, $score->{ownerid});
+    }
+    my $text = "(-c0000)<<< Priority Points >>>\n";
+    $text .= "for $utilName\n\n";
+
+    for (my $i = 1; $i < 12; ++$i) {
+      $Racename = rstMapOwnerToRaceName($parsedReply, $i);
+      if ($scores[$i] > 0) {
+        if ($change[$i] >= 0) { 
+          $plus = "+"; 
+        } else { 
+          $change[$i] = $change[$i] * -1;
+          $plus = "-"; 
+        }
+        $text .= "$Racename ($player[$i]): $scores[$i] ($plus $change[$i])\n";
+      } else {
+        $text .= "$Racename ($player[$i]): -\n";
+      }
+    }
+
+    return $text;
 }
 
 sub rstSynthesizeMessages {
@@ -2318,31 +2451,37 @@ sub rstSynthesizeMessages {
     my $player = shift;
     my @result;
     my $text;
-	my $count = 1;
-	my $row = 0;
-	my $answer;
+    my $count = 1;
+    my $row = 0;
+    my $answer;
 
     # Settings I (from 'game')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (1) >>>",
-                                    $parsedReply->{rst}{game},
-                                    [name=>"Game Name: %s"],
-									[id=>"ID: %s"],									
-									[shortdescription=>"Short Description: %s"],
-									"\n",
-									[description=>"%s"]);
+                                 $parsedReply->{rst}{game},
+                                 [name=>"Game Name: %s"],
+                                 [id=>"ID: %s"],
+                                 [shortdescription=>"Short Description: %s"],
+                                 "\n",
+                                 [description=>"%s"]);
     # Wordwrap for VPA
     $text =~ s| *<br */?> *| |g;
-	$text =~ s|<sub>.*?<\/sub>||g;
+    $text =~ s|<sub>.*?<\/sub>||g;
     $text =~ s/(?=.{40,})(.{0,40}(?:\r\n?|\n\r?)?)( )/$1$2\n/g;
     push @result, rstEncryptMessage($text) if defined($text);
 
     # Settings II (from 'game' and NU-Infos)
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (2) >>>",
-                                    $parsedReply->{rst}{game},
-									[timetohost=>"Time to Host: %s"],
-                                    [hostdays=>"Host Days: %s"],
-                                    [hosttime=>"Host Time: %s"], "\n",
-									[masterplanetid=>"Master Planet Id: %s"], "\n");
+                                 $parsedReply->{rst}{game},
+                                 [timetohost         =>"Time to Host: %s"],                                 
+                                 [hostdays           =>"Host Days: %s"],
+                                 [hosttime           =>"Host Time: %s"],
+                                 [nexthost           =>"Next Host: %s"],
+                                 "\n",
+                                 [masterplanetid     =>"Master Planet Id: %s"], 
+                                 [datecreated        =>"Date created: %s"],
+                                 [wincondition       =>"Master Planet Id: %s"],                                 
+                                 [slots              =>"Slots: %s"], 
+                                 "\nc2nu.inf:\n");
     $text .= "User Name: ".stateGet('user')."\n";
     $text .= "Game Number: ".stateGet('gameid')."\n";
     $text .= "c2nu version: $VERSION\n";
@@ -2351,14 +2490,18 @@ sub rstSynthesizeMessages {
     # Settings III (from 'settings')
     $text = rstSynthesizeMessage("(-h0000)<<< Game Settings (3) >>>",
                                  $parsedReply->{rst}{settings},
-                                 [turn               => "Turn                  %s"],
+                                 [turn               => "Turn:                 %s"],
                                  [buildqueueplanetid => "Build Queue Planet:   %s"],
                                  [victorycountdown   => "Victory Countdown:    %s"],
                                  "\n",
-								 [fightorfail        => "Fight Or Fail:        ". ($parsedReply->{rst}{settings}{campaignmode} == 1 ? "Yes" : "No")],
-								 [fofaccelstartturn  => "FOF Accel Start Turn: %s"],
-								 [fofaccelstartturn  => "FOF Accel Start Date: %s"],
-								 "\n",
+                                 [fightorfail        => "FOF Minimum Planets:  %s"],
+                                 [fofincrement       => "FOF increment:        %s"],
+                                 [fofaccelrate       => "FOF accelerte:        %s"],
+                                 [fofbyteam          => "Fight by Team:        ". ($parsedReply->{rst}{settings}{fofbyteam} == 1 ? "Yes" : "No")],
+                                 [fofaccelstartturn  => "FOF Accel Start Turn: %s"],
+                                 [fofaccelstartdate  => "FOF Accel Start Date: %s"],
+
+                                 "\n",
                                  [hoststart          => "Host started:   %s"],
                                  [hostcompleted      => "Host completed: %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
@@ -2368,9 +2511,9 @@ sub rstSynthesizeMessages {
                                  $parsedReply->{rst}{settings},
                                  [cloakfail          => "Odds of cloak failure         %s%%"],
                                  [maxions            => "Ion Storms                    %s"],
-								 [nebulas            => "Nebulas                       %s"],
-								 [stars              => "Stars                         %s"],
-								 [maxwormholes       => "Wormholes                     %s"],
+                                 [nebulas            => "Nebulas                       %s"],
+                                 [stars              => "Stars                         %s"],
+                                 [maxwormholes       => "Wormholes                     %s"],
                                  [shipscanrange      => "Ships are visible at          %s"],
                                  [structuredecayrate => "structure decay               %s"],
                                  "\n",
@@ -2384,7 +2527,7 @@ sub rstSynthesizeMessages {
                                  [planetscanrange    => "Planets are visible at        %s"]);
     push @result, rstEncryptMessage($text) if defined($text);
 
-	$text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (2)>>>",
+    $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (2)>>>",
                                  $parsedReply->{rst}{settings},
                                  [campaignmode            => "Campaign Mode                 ". ($parsedReply->{rst}{settings}{campaignmode} == 1 ? "Yes" : "No")],
                                  [fascistdoublebeams      => "Fascist Double Beams          ". ($parsedReply->{rst}{settings}{fascistdoublebeams} == 1 ? "Yes" : "No")],
@@ -2401,44 +2544,46 @@ sub rstSynthesizeMessages {
                                  [nosupplies              => "no Supplies                   ". ($parsedReply->{rst}{settings}{nosupplies} == 1 ? "Yes" : "No")],
                                  [nowarpwells             => "no Warpwells                  ". ($parsedReply->{rst}{settings}{nowarpwells} == 1 ? "Yes" : "No")],
                                  [directtransfermc        => "direct transfer MC            ". ($parsedReply->{rst}{settings}{directtransfermc} == 1 ? "Yes" : "No")],
-                                 [directtransferammo      => "direct transfer Ammo          ". ($parsedReply->{rst}{settings}{directtransferammo} == 1 ? "Yes" : "No")]);
-                                
+                                 [directtransferammo      => "direct transfer Ammo          ". ($parsedReply->{rst}{settings}{directtransferammo} == 1 ? "Yes" : "No")],
+                                 [nuionstorms             => "NU-Ionstorms (Cloud)          ". ($parsedReply->{rst}{settings}{nuionstorms} == 1 ? "Yes" : "No")]);
+
+
     push @result, rstEncryptMessage($text) if defined($text);
-	
-#	$text = "(-g0000)<<< Host Configuration ($count)>>>\n\n";
-#	foreach ( @$parsedReply->{rst}{settings} ) {
-#		$answer = $parsedReply->{rst}{settings}{$_};
-#		text .= sprintf($_, ($answer == 1 ? "Yes" : "No") , "\n");
+
+#    $text = "(-g0000)<<< Host Configuration ($count)>>>\n\n";
+#    foreach ( @$parsedReply->{rst}{settings} ) {
+#        $answer = $parsedReply->{rst}{settings}{$_};
+#        text .= sprintf($_, ($answer == 1 ? "Yes" : "No") , "\n");
 #       row += 1;
-#		if (row = 16) {
-#			row = 0;
-#			$count += 1;
-#			push @result, rstEncryptMessage($text) if defined($text);
-#			$text = rstSynthesizeMessage("(-g0000)<<< Host Configuration ($count)>>>\n\n";
-#		}
-#	}
-	
+#        if (row = 16) {
+#            row = 0;
+#            $count += 1;
+#            push @result, rstEncryptMessage($text) if defined($text);
+#            $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration ($count)>>>\n\n";
+#        }
+#    }
+
     # HConfig arrays
     foreach ([freefighters=>"Free fighters at starbases", "%3s"],
              [groundattack=>"Ground Attack Kill Ratio", "%3s : 1"],
              [grounddefense=>"Ground Defense Kill Ratio", "%3s : 1"],
              [miningrate=>"Mining rates", "%3s"],
              [taxrate=>"Tax rates", "%3s"])
-      {
-          my $key = $_->[0];
-          my $fmt = $_->[2];
-          my $did = 0;
-          $text = "(-g0000)<<< Host Configuration >>>\n\n$_->[1]\n";
-          foreach my $r (@{$parsedReply->{rst}{races}}) {
-              if (exists($r->{$key}) && exists($r->{adjective}) && $r->{id} != 0) {
-                  $text .= sprintf("  %-15s", $r->{adjective})
+    {
+        my $key = $_->[0];
+        my $fmt = $_->[2];
+        my $did = 0;
+        $text = "(-g0000)<<< Host Configuration >>>\n\n$_->[1]\n";
+        foreach my $r (@{$parsedReply->{rst}{races}}) {
+            if (exists($r->{$key}) && exists($r->{adjective}) && $r->{id} != 0) {
+                $text .= sprintf("  %-15s", $r->{adjective})
                     . sprintf($fmt, $r->{$key})
-                      . "\n";
-                  $did = 1;
-              }
-          }
-          push @result, rstEncryptMessage($text) if $did;
-      }
+                    . "\n";
+                $did = 1;
+            }
+        }
+        push @result, rstEncryptMessage($text) if $did;
+    }
 
     @result;
 }
@@ -2470,11 +2615,8 @@ sub rstPackShipXY {
     my @shipxy = replicate(999*4, 0);
 
     foreach my $ship (@{$parsedReply->{rst}{ships}}) {
-		if ($ship->{hullid} > 105) {
-			#print "rstPackShipXY: Ship $ship->{hullid} patched to";
-			#$ship->{hullid} = stateGet($ship->{hullid});
-			#print " Ship $ship->{hullid}\n"; } #Patch ship's hullid
-			print "rstPackShipXY: Ship $ship->{hullid} already patched\n"; } #Patch ship's hullid
+        if ($ship->{hullid} > 105) {
+            print "rstPackShipXY:  Ship $ship->{id} mit hull $ship->{hullid} already patched\n"; } #Patch ship's hullid
         if ($ship->{id} > 0 && $ship->{id} <= 999) {
             my $pos = ($ship->{id} - 1) * 4;
             $shipxy[$pos]   = $ship->{x};
@@ -2680,6 +2822,39 @@ sub rstMapOwnerToRace {
         }
     }
     return 0;
+}
+
+sub rstMapOwnerToPlayer {
+    my $parsedReply = shift;
+    my $ownerId = shift;
+    foreach my $p (@{$parsedReply->{rst}{players}}) {
+        if ($p->{id} == $ownerId) {
+            return $p->{username};
+        }
+    }
+    return " ";
+}
+
+sub rstMapOwnerToRaceName {
+    my $parsedReply = shift;
+    my $ownerId = shift;
+    foreach my $p (@{$parsedReply->{rst}{races}}) {
+        if ($p->{id} == $ownerId) {
+            return $p->{shortname};
+        }
+    }
+    return " ";
+}
+
+sub gethullname {
+    my $parsedReply = shift;
+    my $hullId = shift;
+    foreach my $p (@{$parsedReply->{rst}{hulls}}) {
+        if ($p->{id} == $hullId) {
+            return $p->{name};
+        }
+    }
+    return " ";
 }
 
 ######################################################################
@@ -2966,7 +3141,7 @@ sub mktPackPlanet {
     my $parsedReply = shift;
     my $p = shift;
     my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $p->{id});
-
+    #print ("ID: $p->{id} Supplies: $p->{supplies} SuppliesSold: $p->{suppliesSold}\n");
     mktPack("Planet".$p->{id},
             Id => $p->{id},
             FriendlyCode => $p->{fcode},
@@ -3010,58 +3185,41 @@ sub mktPackShip {
     }
 
     # Mission: undo remapping
+    # Adddition for new VPA V3.81 client (30th Anniversary)
+    # Mission 6=tow No Cash Transfer in VPA uses Original!
+    my $tmc = 0;    
     my $m = $s->{mission} - 1;
+    if ($m >= 900) {
+      $m -= 900;      
+      if ($m == 6) {
+        $tmc = $origShip->{transfermegacredits}; #get cash original transfer fom NU-rst
+        print "WARNING VPA 3.81 feature: Ship: $s->{id} transfer megacredits: $tmc from NU-rst (Tow Mission)\n";
+      } else {
+        $tmc = $s->{towid}; #get cash from Extended Mission
+        $s->{towid} = 0;    #nescessary?
+        print "VPA 3.81 feature: Ship: $s->{id} MC: $s->{money} unload MC: $tmc to $s->{unloadid} by extended mission $m\n";
+      }     
+    }     
+    
     my $t1 = $m==7 ? $s->{intid} : $m==6 ? $s->{towid} : 0;
     my $t2 = 0;
-	
+
     # Transfer
     my @x;
-	my $ts = 0;
-	my $tmc = 0;
-	my $tma = 0;
+    my $tma = $origShip->{transferammo};   # Restore original Transfer-Ammo
 
-    if (mktShipHasTransfer($s, 'unload')) {
+    if ( (mktShipHasTransfer($s, 'unload')) || ($tmc > 0) ){
         if (mktShipHasTransfer($s, 'transfer')) {
             print "WARNING: ship $s->{id} has unload and transfer order at the same time, transfer was ignored\n";
         }
-        #print "Quapla2: ship $s->{id} unloads to #$s->{unloadid}\n";
         my $TType;
         if ($s->{unloadid} eq 0) { $TType = 3; } else { $TType = 1; }
-		#Adddition for new VPA V3.80 client (25th Anniversary)
-		
-		if ($parsedReply->{rst}{settings}{nosupplies} && 
-		    $parsedReply->{rst}{settings}{directtransfermc}) {
-			#use TransferSupplies as MC, since no supplies allowed
-			$ts = 0; $tmc = $s->{unloadsupplies};			
-		} else {
-			#use transfer supplies, and try to use original transer MC/ammo
-			$ts = $s->{unloadsupplies};			
-			if ($origShip->{transfermegacredits} || $origShip->{transferammo}) {
-				$tmc = $origShip->{transfermegacredits}; 
-				$tma = $origShip->{transferammo};				
-				print "WARNING: Original ship $s->{id} transfer of $origShip->{transfermegacredits} MC / $origShip->{transferammo} Ammo reestablished from NU-RST\n";
-			}
-		}
-		
-#		if ($ship->{transfermegacredits} || $ship->{transferammo}) {
-#				if ($parsedReply->{rst}{settings}{nosupplies}) {
-#					print "WARNING: transfer of mc and/or ammo only for VPA V3.80 yet\n";
-#				} else {
-#					print  "WARNING: transfer of mc and/or ammo not possible yet\n";
-#					$pAdjust->{$adjkey}{$newMC} += $ship->{transfermegacredits} ;
-#					$pAdjust->{$adjkey}{$newMC} += $ship->{transferammo} ;
-#				}
-#			}
-
-
-
-		
         @x = (TransferNeutronium => $s->{unloadneutronium},
               TransferDuranium => $s->{unloadduranium},
               TransferTritanium => $s->{unloadtritanium},
               TransferMolybdenum => $s->{unloadmolybdenum},
               TransferMegaCredits => $tmc,
-              TransferSupplies => $ts,
+              TransferSupplies => $s->{unloadsupplies},
               TransferClans => $s->{unloadclans},
               TransferAmmo => $tma,
               TransferTargetId => $s->{unloadid},
@@ -3071,8 +3229,8 @@ sub mktPackShip {
               TransferDuranium => $s->{transferduranium},
               TransferTritanium => $s->{transfertritanium},
               TransferMolybdenum => $s->{transfermolybdenum},
-              TransferMegaCredits => $tmc,
-              TransferSupplies => $ts,
+              TransferMegaCredits => $s->{transfermegacredits},
+              TransferSupplies => $s->{unloadsupplies},
               TransferClans => $s->{transferclans},
               TransferAmmo => $tma,
               TransferTargetId => $s->{transferid},
@@ -3098,6 +3256,12 @@ sub mktPackShip {
         } else {
             $enemy = $enemyRace->{id};
         }
+    }
+    
+    # Money adjustment
+    if ($origShip->{megacredits} >= 65536) {
+      print "WARNING VPA handles max 65K cash: Ship: $s->{id} has $origShip->{megacredits} megacredits. Uses NU ammount.\n";
+      $s->{money} = $origShip->{megacredits};
     }
 
     mktPack("Ship".$s->{id},
@@ -3134,23 +3298,26 @@ sub mktCompleteFlows {
     my $pBases = shift;
 
     foreach my $p (@$pPlanets) {
-        # Planet: supplies
-        my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $p->{id});
-        $p->{suppliesSold} = $origPlanet->{supplies} - $p->{supplies} + $origPlanet->{suppliessold};
+        # No Supplies Changes....         
+          # Planet: supplies
+          my $origPlanet = asearch($parsedReply->{rst}{planets}, 'id', $p->{id});
+          $p->{suppliesSold} = $origPlanet->{supplies} - $p->{supplies} + $origPlanet->{suppliessold};
 
-        # Structures
-        foreach (qw(mines factories defense)) {
-            $p->{suppliesSold} -= $p->{$_} - $origPlanet->{$_};
-        }
-
-        # Ship supplies
-        foreach my $s (@$pShips) {
-            if ($s->{x} == $p->{x} && $s->{y} == $p->{y}) {
-                my $origShip = asearch($parsedReply->{rst}{ships}, 'id', $s->{id});
-                $p->{suppliesSold} += $origShip->{supplies} - $s->{supplies};
+          # Structures - No Change with NOSUPPLIES
+          if (not $parsedReply->{rst}{settings}{nosupplies}) {
+            foreach (qw(mines factories defense)) {
+                $p->{suppliesSold} -= $p->{$_} - $origPlanet->{$_};
             }
-        }
-
+          }
+          
+          # Ship supplies
+          foreach my $s (@$pShips) {
+              if ($s->{x} == $p->{x} && $s->{y} == $p->{y}) {
+                  my $origShip = asearch($parsedReply->{rst}{ships}, 'id', $s->{id});
+                  $p->{suppliesSold} += $origShip->{supplies} - $s->{supplies};
+              }
+          }        
+        
         # Base and orbits: ammo
         my $b = asearch($pBases, 'id', $p->{id});
         if (defined($b)) {
