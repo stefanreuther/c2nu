@@ -291,8 +291,12 @@ sub doList {
         foreach (@{$parsedReply->{games}}) {
             my $gameName = $_->{game}{name} || '?';
             my $gameNr   = $_->{game}{id}   || 0;
-            my $type     = $_->{game}{gametype} == 2 ? 'Normal' :
-                $_->{game}{gametype} == 1 ? 'Training' : '?';
+            my $type     = !defined($_->{game}{gametype}) ? 'unknown' :
+                $_->{game}{gametype} == 2 ? 'Normal' :
+                $_->{game}{gametype} == 1 ? 'Training' :
+                $_->{game}{gametype} == 100 ? 'Home Sector' : 
+                '('.$_->{game}{gametype}.')';
+                # also in code: 3 (team/league??), 4 (melee?), 5 (blitz?), 6 (championship?), 7, 8 (single-player mobile)
             my $race = $_->{player}{raceid} || '?';
 
             # Print
