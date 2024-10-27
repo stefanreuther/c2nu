@@ -1826,6 +1826,9 @@ sub doServe {
                || $data =~ s/\Avar\s+\S+\s*=\s*//sg)
         { }
 
+        # Some of my test RSTs have "success":"true" instead of "success":true which confuses c2ng
+        $data =~ s/"true"/true/g;
+
         my $rst = jsonParse($data);
         my $id = $rst->{rst}{game}{id};
         my $turn = $rst->{rst}{game}{turn};
