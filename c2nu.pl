@@ -1828,13 +1828,14 @@ sub doServe {
 
         my $rst = jsonParse($data);
         my $id = $rst->{rst}{game}{id};
-        if (!$id) {
+        my $turn = $rst->{rst}{game}{turn};
+        if (!$id || !$turn) {
             die "$_: not a result file\n";
         }
-        if (exists $rsts{$id}) {
-            die "$_: duplicate game identifier; cannot serve these files in one go\n";
+        if (exists $rsts{$id}{$turn}) {
+            die "$_: duplicate result file; cannot serve these files in one go\n";
         }
-        $rsts{$id} = $rst;
+        $rsts{$id}{$turn} = $rst;
         print "\tGame $id: $rst->{rst}{game}{name}, turn $rst->{rst}{game}{turn}\n";
     }
 
@@ -1916,12 +1917,22 @@ sub srvHandleRequest {
     } elsif ($url eq '/account/mygames') {
         my @list;
         foreach (sort keys %$rsts) {
-            push @list, {game => $rsts->{$_}{rst}{game},
-                         player => $rsts->{$_}{rst}{player}};
+            my $k = getNewest($rsts->{$_});
+            push @list, {game => $k->{rst}{game},
+                         player => $k->{rst}{player}};
         }
         return srvWrapText(jsonFormat({games=>\@list}));
     } elsif ($url eq '/game/loadturn' && exists $rsts->{$param->{gameid}}) {
-        return srvWrapText(jsonFormat($rsts->{$param->{gameid}}));
+        my $k = $rsts->{$param->{gameid}};
+        if (exists $param->{turn}) {
+            if (exists $k->{$param->{turn}}) {
+                return srvWrapText(jsonFormat($k->{$param->{turn}}));
+            } else {
+                return undef;
+            }
+        } else {
+            return srvWrapText(jsonFormat(getNewest($k)));
+        }
     } else {
         return undef;
     }
@@ -3754,6 +3765,12 @@ sub jsonFormat {
 #  Utilities
 #
 ######################################################################
+
+sub getNewest {
+    my $k = shift;
+    my @keys = sort {$b <=> $a} keys %$k;
+    $k->{$keys[0]};
+}
 
 sub replicate {
     my $n = shift;
