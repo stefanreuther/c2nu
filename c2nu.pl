@@ -2372,7 +2372,7 @@ sub rstSynthesizeMessages {
                                  [buildqueueplanetid => "Build Queue Planet:   %s"],
                                  [victorycountdown   => "Victory Countdown:    %s"],
                                  "\n",
-                                 [fightorfail        => "Fight Or Fail:        ". ($parsedReply->{rst}{settings}{campaignmode} == 1 ? "Yes" : "No")],
+                                 [fightorfail        => "Fight Or Fail:        %y"],
                                  [fofaccelstartturn  => "FOF Accel Start Turn: %s"],
                                  [fofaccelstartturn  => "FOF Accel Start Date: %s"],
                                  "\n",
@@ -2393,7 +2393,7 @@ sub rstSynthesizeMessages {
                                  "\n",
                                  [mapwidth           => "Map width                     %s"],
                                  [mapheight          => "Map height                    %s"],
-                                 [sphere             => "Wrap                          ". ($parsedReply->{rst}{settings}{sphere} == 1 ? "Yes" : "No")],
+                                 [sphere             => "Wrap                          %y"],
                                  "\n",
                                  [maxallies          => "Maximum allies                %s"],
                                  [numplanets         => "Number of planets             %s"],
@@ -2403,22 +2403,22 @@ sub rstSynthesizeMessages {
 
     $text = rstSynthesizeMessage("(-g0000)<<< Host Configuration (2)>>>",
                                  $parsedReply->{rst}{settings},
-                                 [campaignmode            => "Campaign Mode                 ". ($parsedReply->{rst}{settings}{campaignmode} == 1 ? "Yes" : "No")],
-                                 [fascistdoublebeams      => "Fascist Double Beams          ". ($parsedReply->{rst}{settings}{fascistdoublebeams} == 1 ? "Yes" : "No")],
-                                 [starbasefightertransfer => "Starbase Fighter Transfer     ". ($parsedReply->{rst}{settings}{starbasefightertransfer} == 1 ? "Yes" : "No")],
-                                 [superspyadvanced        => "Superspy Advanced             ". ($parsedReply->{rst}{settings}{superspyadvanced} == 1 ? "Yes" : "No")],
-                                 [cloakandintercept       => "Cloak and intercept           ". ($parsedReply->{rst}{settings}{cloakandintercept} == 1 ? "Yes" : "No")],
-                                 [quantumtorpedos         => "Quantumtorpedos               ". ($parsedReply->{rst}{settings}{quantumtorpedos} == 1 ? "Yes" : "No")],
-                                 [galacticpower           => "Galacticpower                 ". ($parsedReply->{rst}{settings}{galacticpower} == 1 ? "Yes" : "No")],
+                                 [campaignmode            => "Campaign Mode                 %y"],
+                                 [fascistdoublebeams      => "Fascist Double Beams          %y"],
+                                 [starbasefightertransfer => "Starbase Fighter Transfer     %y"],
+                                 [superspyadvanced        => "Superspy Advanced             %y"],
+                                 [cloakandintercept       => "Cloak and intercept           %y"],
+                                 [quantumtorpedos         => "Quantumtorpedos               %y"],
+                                 [galacticpower           => "Galacticpower                 %y"],
                                  "\n",
-                                 [cloningenabled          => "Cloning enabled               ". ($parsedReply->{rst}{settings}{cloningenabled} == 1 ? "Yes" : "No")],
-                                 [unlimitedfuel           => "unlimited Fuel                ". ($parsedReply->{rst}{settings}{unlimitedfuel} == 1 ? "Yes" : "No")],
-                                 [unlimitedammo           => "unlimited Ammo                ". ($parsedReply->{rst}{settings}{unlimitedammo} == 1 ? "Yes" : "No")],
+                                 [cloningenabled          => "Cloning enabled               %y"],
+                                 [unlimitedfuel           => "unlimited Fuel                %y"],
+                                 [unlimitedammo           => "unlimited Ammo                %y"],
                                  "\n",
-                                 [nosupplies              => "no Supplies                   ". ($parsedReply->{rst}{settings}{nosupplies} == 1 ? "Yes" : "No")],
-                                 [nowarpwells             => "no Warpwells                  ". ($parsedReply->{rst}{settings}{nowarpwells} == 1 ? "Yes" : "No")],
-                                 [directtransfermc        => "direct transfer MC            ". ($parsedReply->{rst}{settings}{directtransfermc} == 1 ? "Yes" : "No")],
-                                 [directtransferammo      => "direct transfer Ammo          ". ($parsedReply->{rst}{settings}{directtransferammo} == 1 ? "Yes" : "No")]);
+                                 [nosupplies              => "no Supplies                   %y"],
+                                 [nowarpwells             => "no Warpwells                  %y"],
+                                 [directtransfermc        => "direct transfer MC            %y"],
+                                 [directtransferammo      => "direct transfer Ammo          %y"]);
 
     push @result, rstEncryptMessage($text) if defined($text);
 
@@ -2469,7 +2469,13 @@ sub rstSynthesizeMessage {
     foreach (@_) {
         if (ref) {
             if (exists $pHash->{$_->[0]}) {
-                $text .= sprintf($_->[1], $pHash->{$_->[0]}) . "\n";
+                my $txt = $_->[1];
+                if ($pHash->{$_->[0]}) {
+                    $txt =~ s/%y/Yes/;
+                } else {
+                    $txt =~ s/%y/No/;
+                }
+                $text .= sprintf($txt, $pHash->{$_->[0]}) . "\n";
                 $did = 1;
                 $gap = 0;
             }
