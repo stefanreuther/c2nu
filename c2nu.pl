@@ -1816,6 +1816,7 @@ sub doServe {
 
     # Load
     my %rsts;
+    my $account = {};
     foreach (@rsts) {
         my $data = readFile($_);
         print "Parsing $_...\n";
@@ -1832,14 +1833,17 @@ sub doServe {
         my $rst = jsonParse($data);
         my $id = $rst->{rst}{game}{id};
         my $turn = $rst->{rst}{game}{turn};
-        if (!$id || !$turn) {
-            die "$_: not a result file\n";
+        if ($id && $turn) {
+            if (exists $rsts{$id}{$turn}) {
+                die "$_: duplicate result file; cannot serve these files in one go\n";
+            }
+            $rsts{$id}{$turn} = $rst;
+            print "\tGame $id: $rst->{rst}{game}{name}, turn $rst->{rst}{game}{turn}\n";
+        } elsif ($rst->{account}) {
+            $account = $rst;
+        } else {
+            die "$_: not a result or account file\n";
         }
-        if (exists $rsts{$id}{$turn}) {
-            die "$_: duplicate result file; cannot serve these files in one go\n";
-        }
-        $rsts{$id}{$turn} = $rst;
-        print "\tGame $id: $rst->{rst}{game}{name}, turn $rst->{rst}{game}{turn}\n";
     }
 
     # Serve
@@ -1892,7 +1896,7 @@ sub doServe {
             }
 
             # Handle request
-            my $response = srvHandleRequest(\%rsts, $url, \%params);
+            my $response = srvHandleRequest(\%rsts, $account, $url, \%params);
             if (defined($response)) {
                 print $client $response;
             } else {
@@ -1912,11 +1916,13 @@ sub doServe {
 
 sub srvHandleRequest {
     # Handle a single request. Returns the whole request message (or undef).
-    my ($rsts, $url, $param) = @_;
+    my ($rsts, $account, $url, $param) = @_;
     if ($url eq '/') {
         return srvWrapText("\"c2nu server\"");
     } elsif ($url eq '/account/login') {
         return srvWrapText('{"success":true,"apikey":"1234"}');
+    } elsif ($url eq '/account/load') {
+        return srvWrapText(jsonFormat($account));
     } elsif ($url eq '/account/mygames') {
         my @list;
         foreach (sort keys %$rsts) {
