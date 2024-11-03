@@ -3454,7 +3454,6 @@ sub stateQuote {
     $x =~ s/\t/\\t/g;
     $x =~ s/\t/\\t/g;
     $x =~ s/"/\\"/g;
-    $x =~ s/'/\\'/g;
     $x;
 }
 
