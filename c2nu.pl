@@ -31,6 +31,8 @@
 #    login USER PW  Log in with user Id and password
 #    list           List games (must be logged in)
 #    info [GAME]    Information about a game
+#    query EP K V...     Talk to given endpoint (must be logged in),
+#                   passing the given key/value pairs.
 #if CMD_RST
 #    rst [GAME [TRN]]    Download Nu RST (must be logged in). GAME is the game
 #                   number and can be omitted on second and later uses.
@@ -154,6 +156,8 @@ if ($cmd eq 'help') {
     doList();
 } elsif ($cmd eq 'info') {
     doInfo();
+} elsif ($cmd eq 'query') {
+    doQuery();
 #if CMD_RST
 } elsif ($cmd =~ /^rst([12]?)$/) {
     doDownloadResult() unless $1 eq '2';
@@ -368,6 +372,31 @@ sub infoShowRaw {
     jsonDump(\*STDOUT, $p, "");
 }
 
+
+######################################################################
+#
+#  General Query
+#
+######################################################################
+
+sub doQuery {
+    if (!@ARGV) {
+        die "query: need endpoint name\n";
+    }
+    my $endpoint = shift @ARGV;
+    if ($endpoint !~ m|^/|) {
+        die "query: endpoint must start with '/'\n";
+    }
+    if (@ARGV % 2) {
+        die "query: must have an even number of parameters (key, value)\n";
+    }
+
+    my $reply = httpCall("POST $endpoint HTTP/1.0\n",
+                         httpBuildQuery(apikey => stateGet('apikey'),
+                                        @ARGV),
+                         1);
+    print $reply->{BODY};
+}
 
 
 ######################################################################
@@ -3520,7 +3549,7 @@ sub doStatus {
 
 sub httpCall {
     # Prepare
-    my ($head, $body) = @_;
+    my ($head, $body, $silent) = @_;
     my $host = stateGet('api');
     my $port = 80;
     if ($host =~ s/:(\d+)//) {
@@ -3537,7 +3566,8 @@ sub httpCall {
     $head .= "\r\n";
 
     # Socket cruft
-    print "Calling server...\n";
+    print "Calling server...\n"
+        unless $silent;
     my $ip = inet_aton($host) or die "ERROR: unable to resolve host '$host': $!\n";
     my $paddr = sockaddr_in($port, $ip);
     socket(HTTP, PF_INET, SOCK_STREAM, getprotobyname('tcp')) or die "ERROR: unable to create socket: $!\n";
@@ -3587,7 +3617,8 @@ sub httpCall {
 
     # Body might be compressed; decompress it
     if (exists $reply{'content-encoding'} && lc($reply{'content-encoding'}) eq 'gzip') {
-        print "Decompressing result...\n";
+        print "Decompressing result...\n"
+            unless $silent;
         open TMP, "> c2nu.gz" or die "Cannot open temporary file: $!\n";
         binmode TMP;
         print TMP $replybody;
